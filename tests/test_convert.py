@@ -256,6 +256,23 @@ class ConvertCommsButtonTests(unittest.TestCase):
         self.assertNotIn("--- event_1", story)  # only one chain event remains
         self.assertIn("--- event_0", story)
 
+    def test_gm_button_becomes_gamemaster_route(self):
+        xml = os.path.join(self.tmp.name, "MISS_Gm.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<mission_data version="2.8">
+  <mission_description>gm</mission_description>
+  <start><set_gm_button text="Spawn Wave"/></start>
+  <event name="GH"><if_gm_button text="Spawn Wave"/>
+    <set_variable name="wave" value="1"/></event>
+</mission_data>""")
+        d = convert_file(xml, self.out + "gm")
+        story = open(os.path.join(d, "story.mast"), encoding="utf-8").read()
+        sjson = open(os.path.join(d, "story.json"), encoding="utf-8").read()
+        self.assertIn("//comms if has_roles(COMMS_ORIGIN_ID, 'gamemaster')", story)
+        self.assertIn('+ "Spawn Wave":', story)
+        self.assertIn("wave = 1", story)
+        self.assertIn("gamemaster", sjson)
+
     def test_comment_only_button_body_gets_noop(self):
         # a button whose handler emits only comments must still have a real
         # statement (~~ pass ~~), else the + block is empty and MAST rejects it.

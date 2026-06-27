@@ -55,13 +55,18 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
         lines.extend(em.emit_command(n))
     lines.append("")
 
-    # Comms-button handler events become //comms buttons, not linear-chain labels.
-    button_events: dict[str, object] = {}
+    # Comms-button and GM-button handler events become //comms buttons (the GM ones
+    # gated to the gamemaster console), not linear-chain labels.
+    comms_btn_events: dict[str, object] = {}
+    gm_btn_events: dict[str, object] = {}
     chain_events = []
     for ev in mission.events:
-        btn = next((c for c in ev.conditions if c.tag == "if_comms_button"), None)
-        if btn is not None:
-            button_events.setdefault(btn.get("text", ""), ev)
+        cb = next((c for c in ev.conditions if c.tag == "if_comms_button"), None)
+        gb = next((c for c in ev.conditions if c.tag == "if_gm_button"), None)
+        if cb is not None:
+            comms_btn_events.setdefault(cb.get("text", ""), ev)
+        elif gb is not None:
+            gm_btn_events.setdefault(gb.get("text", ""), ev)
         else:
             chain_events.append(ev)
 
@@ -77,16 +82,28 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
     if not chain_events:
         lines.append("    ->END")
 
-    lines.extend(build_comms_route(mission, em, button_events))
+    lines.extend(build_button_route(
+        mission, em, comms_btn_events, set_tag="set_comms_button",
+        header="//comms", handler_tag="if_comms_button",
+        comment="# 2.8 comms buttons -> a //comms route (refine the gating/selection).",
+        addons=["comms"]))
+    lines.extend(build_button_route(
+        mission, em, gm_btn_events, set_tag="set_gm_button",
+        header="//comms if has_roles(COMMS_ORIGIN_ID, 'gamemaster')",
+        handler_tag="if_gm_button",
+        comment="# 2.8 GM buttons -> a gamemaster-gated //comms route (game master console).",
+        addons=["gamemaster", "gamemaster_comms"]))
     return "\n".join(lines) + "\n"
 
 
-def build_comms_route(mission: Mission, em: Emitter, button_events: dict) -> list[str]:
-    """Emit a //comms route gathering 2.8 comms buttons (set_comms_button +
-    if_comms_button handlers) as `+ "label":` buttons with inline bodies."""
+def build_button_route(mission: Mission, em: Emitter, button_events: dict, *,
+                       set_tag: str, header: str, handler_tag: str,
+                       comment: str, addons: list) -> list[str]:
+    """Emit a //comms-style route gathering 2.8 buttons (``set_tag`` declarations +
+    ``handler_tag`` handler events) as `+ "label":` buttons with inline bodies."""
     declared = []
     for n in mission.all_nodes():
-        if n.tag == "set_comms_button":
+        if n.tag == set_tag:
             t = n.get("text", "")
             if t and t not in declared:
                 declared.append(t)
@@ -94,19 +111,19 @@ def build_comms_route(mission: Mission, em: Emitter, button_events: dict) -> lis
     if not texts:
         return []
 
-    em.addons.add("comms")
-    out = ["", "# 2.8 comms buttons -> a //comms route (refine the gating/selection).",
-           "//comms"]
+    for a in addons:
+        em.addons.add(a)
+    out = ["", comment, header]
     for t in texts:
         out.append(f'    + "{_mast_str(t)}":')
         ev = button_events.get(t)
         body: list[str] = []
         if ev is None:
-            body.append("        # TODO: 2.8 button had no if_comms_button handler")
+            body.append(f"        # TODO: 2.8 button had no {handler_tag} handler")
             body.append("        ~~ pass ~~")
         else:
             for c in ev.conditions:
-                if c.tag != "if_comms_button":
+                if c.tag != handler_tag:
                     body.append(f"        # guard: {_xml_one(c)}")
             for n in ev.commands:
                 body.append(f"        # {_xml_one(n)}")

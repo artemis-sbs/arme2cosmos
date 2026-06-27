@@ -275,6 +275,14 @@ class Emitter:
         return [f'    # clear_comms_button "{n.get("text","")}" '
                 f'(consider gating the //comms button with a flag)']
 
+    def c_set_gm_button(self, n: XmlNode) -> list[str]:
+        self.addons.update({"gamemaster", "gamemaster_comms"})
+        return [f'    # set_gm_button "{n.get("text","")}" '
+                f'(button is in the gamemaster //comms route below)']
+
+    def c_clear_gm_button(self, n: XmlNode) -> list[str]:
+        return [f'    # clear_gm_button "{n.get("text","")}"']
+
     def c_incoming_message(self, n: XmlNode) -> list[str]:
         frm = _mast_str(n.get("from", ""))
         fn = _mast_str(n.get("fileName", ""))
@@ -333,6 +341,8 @@ _COMMAND_EMIT = {
     "set_object_property": Emitter.c_set_object_property,
     "set_comms_button": Emitter.c_set_comms_button,
     "clear_comms_button": Emitter.c_clear_comms_button,
+    "set_gm_button": Emitter.c_set_gm_button,
+    "clear_gm_button": Emitter.c_clear_gm_button,
     "warning_popup_message": Emitter.c_warning_popup,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
