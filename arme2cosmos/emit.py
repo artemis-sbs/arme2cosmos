@@ -251,6 +251,17 @@ class Emitter:
         return [f'    # TODO {var}.data_set.set("<cosmos_key>", {val})  '
                 f'# 2.8 property "{prop}"']
 
+    def c_set_comms_button(self, n: XmlNode) -> list[str]:
+        # The button itself lives in the generated //comms route; this command just
+        # marks when 2.8 made it appear. Keep as a breadcrumb.
+        self.addons.add("comms")
+        return [f'    # set_comms_button "{n.get("text","")}" '
+                f'(button is in the //comms route below)']
+
+    def c_clear_comms_button(self, n: XmlNode) -> list[str]:
+        return [f'    # clear_comms_button "{n.get("text","")}" '
+                f'(consider gating the //comms button with a flag)']
+
     def c_incoming_message(self, n: XmlNode) -> list[str]:
         frm = _mast_str(n.get("from", ""))
         fn = _mast_str(n.get("fileName", ""))
@@ -307,6 +318,8 @@ _COMMAND_EMIT = {
     "destroy_near": Emitter.c_destroy_near,
     "direct": Emitter.c_direct,
     "set_object_property": Emitter.c_set_object_property,
+    "set_comms_button": Emitter.c_set_comms_button,
+    "clear_comms_button": Emitter.c_clear_comms_button,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
     "incoming_message": Emitter.c_incoming_message,

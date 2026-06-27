@@ -207,5 +207,71 @@ class ConvertDirectDestroyTests(unittest.TestCase):
         self.assertIn("a2x_destroy(obj_amb)", self._story())
 
 
+COMMS_BTN_SAMPLE = """<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>buttons</mission_description>
+  <start>
+    <set_comms_button text="Request Bounty" sideValue="2"/>
+  </start>
+  <event name="Bounty">
+    <if_comms_button text="Request Bounty"/>
+    <if_variable name="paid" comparator="NOT" value="1"/>
+    <set_variable name="paid" value="1"/>
+    <big_message title="Bounty paid"/>
+  </event>
+  <event name="OtherLinear">
+    <if_variable name="go" comparator="EQUALS" value="1"/>
+    <set_variable name="done" value="1"/>
+  </event>
+</mission_data>
+"""
+
+
+class ConvertCommsButtonTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.xml = os.path.join(self.tmp.name, "MISS_Btn.xml")
+        with open(self.xml, "w", encoding="utf-8") as f:
+            f.write(COMMS_BTN_SAMPLE)
+        self.out = os.path.join(self.tmp.name, "out")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _story(self):
+        d = convert_file(self.xml, self.out)
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_comms_route_with_button(self):
+        story = self._story()
+        self.assertIn("//comms", story)
+        self.assertIn('+ "Request Bounty":', story)
+        # the handler event's command shows up inside the button body (indented 8)
+        self.assertIn("        a2x_big_message", story)
+
+    def test_button_event_excluded_from_chain(self):
+        story = self._story()
+        # the linear chain should only contain the non-button event
+        self.assertNotIn("--- event_1", story)  # only one chain event remains
+        self.assertIn("--- event_0", story)
+
+    def test_comment_only_button_body_gets_noop(self):
+        # a button whose handler emits only comments must still have a real
+        # statement (~~ pass ~~), else the + block is empty and MAST rejects it.
+        xml = os.path.join(self.tmp.name, "MISS_Empty.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<mission_data version="2.8">
+  <mission_description>x</mission_description>
+  <start><set_comms_button text="Noop"/></start>
+  <event name="H"><if_comms_button text="Noop"/>
+    <set_object_property name="z" property="throttle" value="1"/></event>
+</mission_data>""")
+        d = convert_file(xml, self.out + "2")
+        story = open(os.path.join(d, "story.mast"), encoding="utf-8").read()
+        self.assertIn('+ "Noop":', story)
+        self.assertIn("~~ pass ~~", story)
+
+
 if __name__ == "__main__":
     unittest.main()

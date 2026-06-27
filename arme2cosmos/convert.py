@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import re
 
-from .emit import Emitter, emit_condition
+from .emit import Emitter, emit_condition, _mast_str
 from .model import Mission
 from .parser import parse_file
 
@@ -55,7 +55,17 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
         lines.extend(em.emit_command(n))
     lines.append("")
 
-    for i, ev in enumerate(mission.events):
+    # Comms-button handler events become //comms buttons, not linear-chain labels.
+    button_events: dict[str, object] = {}
+    chain_events = []
+    for ev in mission.events:
+        btn = next((c for c in ev.conditions if c.tag == "if_comms_button"), None)
+        if btn is not None:
+            button_events.setdefault(btn.get("text", ""), ev)
+        else:
+            chain_events.append(ev)
+
+    for i, ev in enumerate(chain_events):
         lines.append(f"--- event_{i}" + (f"   # {ev.name}" if ev.name != f"event_{i}" else ""))
         for c in ev.conditions:
             lines.extend(emit_condition(em, c, i))
@@ -64,9 +74,50 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
             lines.extend(em.emit_command(n))
         lines.append("")
 
-    if not mission.events:
+    if not chain_events:
         lines.append("    ->END")
+
+    lines.extend(build_comms_route(mission, em, button_events))
     return "\n".join(lines) + "\n"
+
+
+def build_comms_route(mission: Mission, em: Emitter, button_events: dict) -> list[str]:
+    """Emit a //comms route gathering 2.8 comms buttons (set_comms_button +
+    if_comms_button handlers) as `+ "label":` buttons with inline bodies."""
+    declared = []
+    for n in mission.all_nodes():
+        if n.tag == "set_comms_button":
+            t = n.get("text", "")
+            if t and t not in declared:
+                declared.append(t)
+    texts = list(dict.fromkeys(declared + list(button_events)))
+    if not texts:
+        return []
+
+    em.addons.add("comms")
+    out = ["", "# 2.8 comms buttons -> a //comms route (refine the gating/selection).",
+           "//comms"]
+    for t in texts:
+        out.append(f'    + "{_mast_str(t)}":')
+        ev = button_events.get(t)
+        body: list[str] = []
+        if ev is None:
+            body.append("        # TODO: 2.8 button had no if_comms_button handler")
+            body.append("        ~~ pass ~~")
+        else:
+            for c in ev.conditions:
+                if c.tag != "if_comms_button":
+                    body.append(f"        # guard: {_xml_one(c)}")
+            for n in ev.commands:
+                body.append(f"        # {_xml_one(n)}")
+                for ln in em.emit_command(n):
+                    body.append(("    " + ln) if ln.strip() else ln)
+        # A `+ "..":` block needs at least one real statement; an all-comment body is
+        # an empty block to MAST. Add a pass when nothing executable was emitted.
+        if not any(ln.strip() and not ln.strip().startswith("#") for ln in body):
+            body.append("        ~~ pass ~~")
+        out.extend(body)
+    return out
 
 
 def _xml_one(n) -> str:
