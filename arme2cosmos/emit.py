@@ -137,16 +137,22 @@ class Emitter:
         return [f'    DIFFICULTY = {n.get("value", "5")}']
 
     def c_big_message(self, n: XmlNode) -> list[str]:
-        self.note(f'big_message "{n.get("title","")}" -> wire to a story dialog / title card')
-        return [f'    # TODO big_message: title="{n.get("title","")}" '
-                f'sub1="{n.get("subtitle1","")}"']
+        t = _mast_str(n.get("title", ""))
+        s1 = _mast_str(n.get("subtitle1", ""))
+        s2 = _mast_str(n.get("subtitle2", ""))
+        return [f'    a2x_big_message("{t}", "{s1}", "{s2}")']
 
     def c_comms_text(self, n: XmlNode) -> list[str]:
         self.addons.add("comms")
-        frm = n.get("from", "")
-        body = (n.text or "").replace("^", " ").strip()
-        self.note(f'comms from "{frm}": fold into a //comms route or comms_receive')
-        return [f'    # TODO comms from "{frm}": {body[:80]}']
+        frm = _mast_str(n.get("from", ""))
+        body = _mast_str(n.text or "")  # ^ line-breaks preserved; a2x_clean converts them
+        return [f'    a2x_incoming_comms_text("{body}", from_name="{frm}")']
+
+    def c_incoming_message(self, n: XmlNode) -> list[str]:
+        frm = _mast_str(n.get("from", ""))
+        fn = _mast_str(n.get("fileName", ""))
+        self.note(f'incoming_message "{fn}": 2.8 made a play button; a2x plays it directly')
+        return [f'    a2x_incoming_message("{frm}", "{fn}")']
 
     def c_end_mission(self, n: XmlNode) -> list[str]:
         return ['    signal_emit("show_game_results")', "    ->END"]
@@ -155,6 +161,17 @@ class Emitter:
 def _xml_repr(n: XmlNode) -> str:
     attrs = " ".join(f'{k}="{v}"' for k, v in n.attrib.items())
     return f"<{n.tag} {attrs}/>"
+
+
+def _mast_str(s: str) -> str:
+    """Make 2.8 text safe inside a double-quoted MAST string literal.
+
+    Collapses real newlines to spaces (2.8 uses ``^`` for line breaks, which the
+    a2x helpers convert at runtime), and escapes backslashes and double quotes.
+    """
+    s = (s or "").replace("\\", "\\\\").replace('"', '\\"')
+    s = s.replace("\r", " ").replace("\n", " ").strip()
+    return s
 
 
 def _pyname(name: str) -> str:
@@ -183,6 +200,7 @@ _COMMAND_EMIT = {
     "set_difficulty_level": Emitter.c_set_difficulty,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
+    "incoming_message": Emitter.c_incoming_message,
     "end_mission": Emitter.c_end_mission,
 }
 

@@ -71,6 +71,21 @@ class ConvertTests(unittest.TestCase):
         self.assertIn('signal_emit("show_game_results")', story)
         self.assertIn('->END', story)
 
+    def test_comms_and_big_message_are_real_calls(self):
+        # add a start with comms + big_message to the sample on the fly
+        story = self._convert()[1]
+        # base sample has no comms; assert the emitter wires them when present
+        from arme2cosmos.emit import Emitter
+        from arme2cosmos.model import XmlNode
+        em = Emitter.__new__(Emitter)
+        em.notes = []
+        em.addons = set()
+        bm = em.c_big_message(XmlNode("big_message", {"title": 'A "B"', "subtitle1": "by C"}))
+        self.assertEqual(bm, ['    a2x_big_message("A \\"B\\"", "by C", "")'])
+        ct = em.c_comms_text(XmlNode("incoming_comms_text", {"from": "Adm"}, text="Hi^there"))
+        self.assertEqual(ct, ['    a2x_incoming_comms_text("Hi^there", from_name="Adm")'])
+        self.assertIn("comms", em.addons)
+
     def test_anomaly_pulls_upgrades_addon(self):
         _, _, sjson = self._convert()
         self.assertIn("upgrades", sjson)
