@@ -15,6 +15,11 @@ from .model import Event, Mission, XmlNode
 # 2.8 sideValue -> a Cosmos side/role token (1=enemy, 2=friendly/player, 0=none).
 _SIDE = {"0": "neutral", "1": "enemy", "2": "friendly"}
 
+# 2.8 add_ai block types that a2x_add_ai maps to a real brain (mirror of a2x.ai).
+# Others emit the call but a2x_add_ai is a no-op for them -> flagged in notes.
+_AI_MAPPED = {"CHASE_PLAYER", "CHASE_STATION", "CHASE_AI_SHIP", "CHASE_NEUTRAL",
+              "ATTACK", "TARGET_THROTTLE"}
+
 # Tiny starter hull/art crosswalk. The real table is the tool's `artmap`
 # (vesselData.xml <-> shipDataBB.json); these are sensible placeholders so output
 # runs, each flagged in MIGRATION_NOTES.
@@ -30,10 +35,30 @@ class Emitter:
         self.mission = mission
         self.notes: list[str] = []  # punch-list lines for MIGRATION_NOTES.md
         self.addons: set[str] = set()  # feature-detected story.json mastlibs
+        self.symbols: dict[str, str] = {}  # 2.8 object name -> MAST variable
 
     # -- helpers --------------------------------------------------------------
     def note(self, msg: str) -> None:
         self.notes.append(msg)
+
+    def _var_for(self, name: str) -> str:
+        """A stable MAST variable for a 2.8 object name (creates one if needed)."""
+        if name in self.symbols:
+            return self.symbols[name]
+        base = "obj_" + _pyname(name).lower()
+        var, i, used = base, 1, set(self.symbols.values())
+        while var in used:
+            i += 1
+            var = f"{base}_{i}"
+        self.symbols[name] = var
+        return var
+
+    def _assign(self, n: XmlNode, expr: str) -> str:
+        """Indented line; captures the spawn into a variable when the object is named."""
+        name = n.get("name")
+        if name:
+            return f"    {self._var_for(name)} = {expr}"
+        return f"    {expr}"
 
     def _xyz(self, n: XmlNode, px="x", py="y", pz="z"):
         return (n.get(px, "0"), n.get(py, "0"), n.get(pz, "0"))
@@ -60,8 +85,8 @@ class Emitter:
         x, y, z = self._xyz(n)
         self.note(f"verify station art for {n.get('name','?')} "
                   f"(hullID={n.get('hullID')} race={n.get('raceKeys')})")
-        return [f'    a2x_create_station({x}, {y}, {z}, "{_STATION_ART}", '
-                f'side="{self._side(n)}"{self._name_kw(n)})']
+        return [self._assign(n, f'a2x_create_station({x}, {y}, {z}, "{_STATION_ART}", '
+                f'side="{self._side(n)}"{self._name_kw(n)})')]
 
     def c_enemy(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
@@ -70,14 +95,14 @@ class Emitter:
         if fleet:
             side = f"enemy, fleet_{fleet}"  # role so if_fleet_count can await it
         self.note(f"verify enemy art for {n.get('name','?')} "
-                  f"(hullID={n.get('hullID')} race={n.get('raceKeys')}); attach a brain (a2x_add_ai)")
-        return [f'    a2x_create_enemy({x}, {y}, {z}, "{_ENEMY_ART}", '
-                f'side="{side}"{self._name_kw(n)})']
+                  f"(hullID={n.get('hullID')} race={n.get('raceKeys')})")
+        return [self._assign(n, f'a2x_create_enemy({x}, {y}, {z}, "{_ENEMY_ART}", '
+                f'side="{side}"{self._name_kw(n)})')]
 
     def c_neutral(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
-        return [f'    a2x_create_neutral({x}, {y}, {z}, "{_NEUTRAL_ART}", '
-                f'side="{self._side(n)}"{self._name_kw(n)})']
+        return [self._assign(n, f'a2x_create_neutral({x}, {y}, {z}, "{_NEUTRAL_ART}", '
+                f'side="{self._side(n)}"{self._name_kw(n)})')]
 
     def c_player(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
@@ -85,14 +110,16 @@ class Emitter:
         self.note("player ship: a2x_create_player is a scaffold; prefer the consoles/"
                   "fleets addon (PLAYER_LIST + spawn_players) for real console wiring")
         nm = n.get("name") or "Artemis"
-        return [f'    a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", name="{nm}")']
+        expr = f'a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", name="{nm}")'
+        return [self._assign(n, expr) if n.get("name") else f"    {expr}"]
 
     def c_monster(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
         mt = n.get("monsterType", "0")
         self.note(f"monster type {mt}: placeholder art + creature_ role (real art only "
                   f"for classic/derelict)")
-        return [f'    a2x_create_monster({x}, {y}, {z}, monster_type={mt}{self._name_kw(n)})']
+        return [self._assign(n, f'a2x_create_monster({x}, {y}, {z}, '
+                f'monster_type={mt}{self._name_kw(n)})')]
 
     def c_anomaly(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
@@ -148,6 +175,26 @@ class Emitter:
         body = _mast_str(n.text or "")  # ^ line-breaks preserved; a2x_clean converts them
         return [f'    a2x_incoming_comms_text("{body}", from_name="{frm}")']
 
+    def c_add_ai(self, n: XmlNode) -> list[str]:
+        self.addons.add("ai")
+        name = n.get("name")
+        typ = (n.get("type") or "").upper()
+        var = self.symbols.get(name)
+        if var is None:
+            self.note(f"add_ai {typ} references object '{name}' not captured here "
+                      f"(forward ref or gm-selected) -- wire by hand")
+            return [f'    # TODO add_ai {typ} on "{name}"']
+        if typ not in _AI_MAPPED:
+            self.note(f"add_ai {typ} on '{name}': no Cosmos brain mapping yet "
+                      f"(a2x_add_ai is a no-op for it) -- choose/author a brain")
+        return [f'    a2x_add_ai({var}, "{typ}")']
+
+    def c_clear_ai(self, n: XmlNode) -> list[str]:
+        var = self.symbols.get(n.get("name"))
+        if var is None:
+            return [f'    # TODO clear_ai on "{n.get("name")}" (object not captured)']
+        return [f"    a2x_clear_ai({var})"]
+
     def c_incoming_message(self, n: XmlNode) -> list[str]:
         frm = _mast_str(n.get("from", ""))
         fn = _mast_str(n.get("fileName", ""))
@@ -198,6 +245,8 @@ _COMMAND_EMIT = {
     "set_variable": Emitter.c_set_variable,
     "set_timer": Emitter.c_set_timer,
     "set_difficulty_level": Emitter.c_set_difficulty,
+    "add_ai": Emitter.c_add_ai,
+    "clear_ai": Emitter.c_clear_ai,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
     "incoming_message": Emitter.c_incoming_message,

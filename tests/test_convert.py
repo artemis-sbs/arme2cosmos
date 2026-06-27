@@ -91,6 +91,59 @@ class ConvertTests(unittest.TestCase):
         self.assertIn("upgrades", sjson)
         self.assertIn("consoles", sjson)  # baseline
 
+    def test_named_objects_captured_in_variables(self):
+        _, story, _ = self._convert()
+        self.assertIn("obj_ds1 = a2x_create_station", story)
+        self.assertIn("obj_kr01 = a2x_create_enemy", story)
+
+
+ADD_AI_SAMPLE = """<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>monsters</mission_description>
+  <start>
+    <create type="monster" monsterType="2" x="20000" y="1" z="70000" name="Bruce"/>
+  </start>
+  <event name="Wake">
+    <if_variable name="go" comparator="EQUALS" value="1"/>
+    <clear_ai name="Bruce"/>
+    <add_ai type="CHASE_PLAYER" value1="10000" name="Bruce"/>
+    <add_ai type="GUARD_STATION" name="Bruce"/>
+  </event>
+</mission_data>
+"""
+
+
+class ConvertAddAiTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.xml = os.path.join(self.tmp.name, "MISS_Mon.xml")
+        with open(self.xml, "w", encoding="utf-8") as f:
+            f.write(ADD_AI_SAMPLE)
+        self.out = os.path.join(self.tmp.name, "out")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _story(self):
+        d = convert_file(self.xml, self.out)
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_add_ai_resolves_named_object_across_events(self):
+        story = self._story()
+        self.assertIn("obj_bruce = a2x_create_monster", story)
+        self.assertIn('a2x_add_ai(obj_bruce, "CHASE_PLAYER")', story)
+        self.assertIn("a2x_clear_ai(obj_bruce)", story)
+
+    def test_unmapped_ai_still_emits_call(self):
+        # GUARD_STATION has no brain; still emitted (a2x_add_ai no-ops) + noted.
+        self.assertIn('a2x_add_ai(obj_bruce, "GUARD_STATION")', self._story())
+
+    def test_add_ai_pulls_ai_addon(self):
+        d = convert_file(self.xml, self.out)
+        with open(os.path.join(d, "story.json"), encoding="utf-8") as f:
+            self.assertIn("ai", f.read())
+
 
 if __name__ == "__main__":
     unittest.main()
