@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arme2cosmos"
+version = "0.0.1"
+description = "Artemis 2.8 XML mission -> Artemis Cosmos MAST migration assistant"
+readme = "README.md"
+requires-python = ">=3.10"
+# Intentionally zero runtime dependencies (stdlib only).
+dependencies = []
+
+[project.scripts]
+arme2cosmos = "arme2cosmos.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["arme2cosmos*"]
