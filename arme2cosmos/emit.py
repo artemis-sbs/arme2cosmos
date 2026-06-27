@@ -251,6 +251,19 @@ class Emitter:
         return [f'    # TODO {var}.data_set.set("<cosmos_key>", {val})  '
                 f'# 2.8 property "{prop}"']
 
+    def c_warning_popup(self, n: XmlNode) -> list[str]:
+        self.addons.add("comms")
+        msg = _mast_str(n.get("message", ""))
+        ship = self.symbols.get(n.get("name"))
+        if ship is None and n.get("player_slot") is not None:
+            ship = self.player_var
+        args = [f'"{msg}"']
+        if n.get("consoles"):
+            args.append(f'consoles="{n.get("consoles")}"')
+        if ship:
+            args.append(f"ship={ship}")
+        return [f'    a2x_warning_popup({", ".join(args)})']
+
     def c_set_comms_button(self, n: XmlNode) -> list[str]:
         # The button itself lives in the generated //comms route; this command just
         # marks when 2.8 made it appear. Keep as a breadcrumb.
@@ -320,6 +333,7 @@ _COMMAND_EMIT = {
     "set_object_property": Emitter.c_set_object_property,
     "set_comms_button": Emitter.c_set_comms_button,
     "clear_comms_button": Emitter.c_clear_comms_button,
+    "warning_popup_message": Emitter.c_warning_popup,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
     "incoming_message": Emitter.c_incoming_message,
