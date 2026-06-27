@@ -7,10 +7,12 @@ declared as stubs so the surface is visible but clearly not yet implemented.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import sys
 
 from . import __version__
+from .convert import convert_file
 from .parser import find_mission_files, parse_file
 from .report import analyze, render_corpus, render_mission
 
@@ -46,6 +48,21 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_convert(args: argparse.Namespace) -> int:
+    files = find_mission_files(args.path)
+    if not files:
+        print(f"No mission .xml files found under: {args.path}", file=sys.stderr)
+        return 2
+    for f in files:
+        try:
+            out = convert_file(f, args.out)
+        except Exception as exc:  # noqa: BLE001
+            print(f"!! failed to convert {f}: {exc}", file=sys.stderr)
+            continue
+        print(f"scaffolded {os.path.basename(f)} -> {out}")
+    return 0
+
+
 def _cmd_stub(args: argparse.Namespace) -> int:
     print(f"'{args._name}' is not implemented yet (planned). See A2X_MIGRATION_PLAN.md.",
           file=sys.stderr)
@@ -69,11 +86,14 @@ def build_parser() -> argparse.ArgumentParser:
                      help="corpus: also print each mission's per-kind breakdown")
     rep.set_defaults(func=_cmd_report)
 
-    for name, help_text in (("convert", "scaffold a Cosmos MAST mission (planned)"),
-                            ("artmap", "draft the vesselData<->shipDataBB crosswalk (planned)")):
-        s = sub.add_parser(name, help=help_text)
-        s.add_argument("path", nargs="?", default=".")
-        s.set_defaults(func=_cmd_stub, _name=name)
+    conv = sub.add_parser("convert", help="scaffold a Cosmos MAST mission from 2.8 XML")
+    conv.add_argument("path", help="a mission .xml, a MISS_ folder, or a parent dir")
+    conv.add_argument("--out", default="out", help="output root directory (default: out/)")
+    conv.set_defaults(func=_cmd_convert)
+
+    art = sub.add_parser("artmap", help="draft the vesselData<->shipDataBB crosswalk (planned)")
+    art.add_argument("path", nargs="?", default=".")
+    art.set_defaults(func=_cmd_stub, _name="artmap")
 
     return p
 
