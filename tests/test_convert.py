@@ -256,6 +256,18 @@ class ConvertCommsButtonTests(unittest.TestCase):
         self.assertNotIn("--- event_1", story)  # only one chain event remains
         self.assertIn("--- event_0", story)
 
+    def test_tags_become_inventory_values(self):
+        from arme2cosmos.emit import Emitter, emit_condition
+        from arme2cosmos.model import XmlNode
+        em = Emitter.__new__(Emitter)
+        em.notes, em.addons, em.symbols, em.player_var, em.hullmap = [], set(), {"M": "obj_m"}, None, None
+        out = "\n".join(em.c_set_monster_tag_data(XmlNode("set_monster_tag_data",
+              {"name": "M", "tag_slot": "1", "sourcetext": "Artemis", "datetext": "D3"})))
+        self.assertIn('set_inventory_value(obj_m, "tag_1_source", "Artemis")', out)
+        cond = emit_condition(em, XmlNode("if_object_tag_matches",
+               {"objectName": "M", "string": "Artemis"}))[0]
+        self.assertIn('get_inventory_value(obj_m, "tag_source_name") == "Artemis"', cond)
+
     def test_gm_button_becomes_gamemaster_route(self):
         xml = os.path.join(self.tmp.name, "MISS_Gm.xml")
         with open(xml, "w", encoding="utf-8") as f:

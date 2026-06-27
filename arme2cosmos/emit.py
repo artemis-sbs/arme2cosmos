@@ -251,6 +251,38 @@ class Emitter:
         return [f'    # TODO {var}.data_set.set("<cosmos_key>", {val})  '
                 f'# 2.8 property "{prop}"']
 
+    def c_set_monster_tag_data(self, n: XmlNode) -> list[str]:
+        var = self.symbols.get(n.get("name"))
+        self.note("2.8 tags stored as inventory values. The tag-torpedo gameplay can be "
+                  "rebuilt in Cosmos: register a tag torpedo via torpedo_type(), then a "
+                  "//damage route keyed on EVENT.sub_tag records the tag on hit "
+                  "(set_inventory_value(DAMAGE_TARGET_ID, 'tag_source_name', ...)).")
+        if var is None:
+            return [f"    # TODO set_monster_tag_data: {_xml_repr(n)}"]
+        slot = n.get("tag_slot", "0")
+        out = []
+        if n.get("sourcetext") is not None:
+            out.append(f'    set_inventory_value({var}, "tag_{slot}_source", '
+                       f'"{_mast_str(n.get("sourcetext"))}")')
+        if n.get("datetext") is not None:
+            out.append(f'    set_inventory_value({var}, "tag_{slot}_date", '
+                       f'"{_mast_str(n.get("datetext"))}")')
+        return out or [f"    # set_monster_tag_data clears slot {slot} on {var}"]
+
+    def c_set_named_object_tag_state(self, n: XmlNode) -> list[str]:
+        var = self.symbols.get(n.get("name"))
+        if var is None:
+            return [f"    # TODO set_named_object_tag_state: {_xml_repr(n)}"]
+        out = [f'    set_inventory_value({var}, "tagged", '
+               f'{"True" if n.get("tagged") is not None else "False"})']
+        if n.get("tagSourceName") is not None:
+            out.append(f'    set_inventory_value({var}, "tag_source_name", '
+                       f'"{_mast_str(n.get("tagSourceName"))}")')
+        if n.get("tagSourceSide") is not None:
+            out.append(f'    set_inventory_value({var}, "tag_source_side", '
+                       f'{n.get("tagSourceSide")})')
+        return out
+
     def c_warning_popup(self, n: XmlNode) -> list[str]:
         self.addons.add("comms")
         msg = _mast_str(n.get("message", ""))
@@ -343,6 +375,8 @@ _COMMAND_EMIT = {
     "clear_comms_button": Emitter.c_clear_comms_button,
     "set_gm_button": Emitter.c_set_gm_button,
     "clear_gm_button": Emitter.c_clear_gm_button,
+    "set_monster_tag_data": Emitter.c_set_monster_tag_data,
+    "set_named_object_tag_state": Emitter.c_set_named_object_tag_state,
     "warning_popup_message": Emitter.c_warning_popup,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
@@ -410,6 +444,14 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0) -> list[str]:
         o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
         neg = "not " if tag == "if_exists" else ""
         return [f"    ->END if {neg}object_exists({o})"]
+    if tag in ("if_monster_tag_matches", "if_object_tag_matches"):
+        name = n.get("name") or n.get("objectName")
+        var = em.symbols.get(name) or f'"{name}"'
+        s = _mast_str(n.get("string", ""))
+        em.note("tag-match: rebuild 2.8 tagging with a tag torpedo_type() + a //damage "
+                "route that sets tag_source_name on hit, then this guard works.")
+        return [f'    # guard: tag match ~ "{s}"  '
+                f'(get_inventory_value({var}, "tag_source_name") == "{s}")']
     if tag == "if_variable":
         return [f'    # guard: {_pyname(n.get("name"))} {n.get("comparator","")} {n.get("value","")}']
     if tag == "if_timer_finished":
