@@ -20,9 +20,9 @@ Implemented:
   to real `a2x_*` calls; everything else is `# TODO`-marked with the original XML
   inline and collected into the notes. Events become a linear chain of `---` labels.
 
-Planned (stub present):
-- **`artmap`** — draft the `vesselData.xml` ↔ `shipDataBB.json` hull crosswalk (would
-  replace the placeholder ship art the converter currently emits).
+- **`artmap`** — draft the `vesselData.xml` ↔ `shipDataBB.json` hull crosswalk
+  (`hullmap.json`) by fuzzy-matching race + classname. Pass it to `convert --hullmap`
+  to resolve real ship art instead of placeholders.
 
 ## Usage
 
