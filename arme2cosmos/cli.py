@@ -55,7 +55,7 @@ def _cmd_convert(args: argparse.Namespace) -> int:
         return 2
     for f in files:
         try:
-            out = convert_file(f, args.out)
+            out = convert_file(f, args.out, args.lib_version)
         except Exception as exc:  # noqa: BLE001
             print(f"!! failed to convert {f}: {exc}", file=sys.stderr)
             continue
@@ -89,6 +89,8 @@ def build_parser() -> argparse.ArgumentParser:
     conv = sub.add_parser("convert", help="scaffold a Cosmos MAST mission from 2.8 XML")
     conv.add_argument("path", help="a mission .xml, a MISS_ folder, or a parent dir")
     conv.add_argument("--out", default="out", help="output root directory (default: out/)")
+    conv.add_argument("--lib-version", default="v1.4.0_dev",
+                      help="sbslib/mastlib version tag for story.json (default: v1.4.0_dev)")
     conv.set_defaults(func=_cmd_convert)
 
     art = sub.add_parser("artmap", help="draft the vesselData<->shipDataBB crosswalk (planned)")

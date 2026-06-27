@@ -17,8 +17,9 @@ from .parser import parse_file
 # Baseline gameplay addons (a gameplay port needs at least consoles); extras are
 # feature-detected by the Emitter (e.g. upgrades when anomalies are present).
 _BASELINE_ADDONS = ["consoles", "docking", "comms", "damage", "prefabs", "fleets"]
-_SBSLIB = "artemis-sbs.sbs_utils.v1.3.0.sbslib"
-_ADDON_FMT = "artemis-sbs.LegendaryMissions.{}.v1.3.0.mastlib"
+# Library version tag the generated story.json references. Matches the libs shipped
+# in the missions __lib__ folder; override with `convert --lib-version`.
+DEFAULT_LIB_VERSION = "v1.4.0_dev"
 
 
 def _slug(name: str) -> str:
@@ -100,11 +101,13 @@ except Exception as e:
 '''
 
 
-def build_story_json(em: Emitter) -> str:
+def build_story_json(em: Emitter, lib_version: str = DEFAULT_LIB_VERSION) -> str:
     addons = list(dict.fromkeys(_BASELINE_ADDONS + sorted(em.addons)))
-    mastlibs = ",\n".join(f'        "{_ADDON_FMT.format(a)}"' for a in addons)
+    sbslib = f"artemis-sbs.sbs_utils.{lib_version}.sbslib"
+    fmt = "artemis-sbs.LegendaryMissions.{}." + lib_version + ".mastlib"
+    mastlibs = ",\n".join(f'        "{fmt.format(a)}"' for a in addons)
     return ('{\n'
-            f'    "sbslib": [\n        "{_SBSLIB}"\n    ],\n'
+            f'    "sbslib": [\n        "{sbslib}"\n    ],\n'
             f'    "mastlib": [\n{mastlibs}\n    ]\n'
             '}\n')
 
@@ -142,7 +145,7 @@ def build_notes(mission: Mission, em: Emitter) -> str:
     return "\n".join(lines) + "\n"
 
 
-def convert_file(path: str, out_root: str) -> str:
+def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSION) -> str:
     """Convert one mission XML; write a scaffold dir under out_root. Returns the dir."""
     mission = parse_file(path)
     em = Emitter(mission)
@@ -151,9 +154,10 @@ def convert_file(path: str, out_root: str) -> str:
     files = {
         "story.mast": story,
         "script.py": build_script_py(mission),
-        "story.json": build_story_json(em),
+        "story.json": build_story_json(em, lib_version),
         "description.yaml": build_description_yaml(mission),
         "MIGRATION_NOTES.md": build_notes(mission, em),
+        "__lib__.json": '{"version": "' + lib_version + '"}\n',
     }
 
     out_dir = os.path.join(out_root, _slug(mission.name))
