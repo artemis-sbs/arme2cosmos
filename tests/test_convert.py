@@ -148,6 +148,7 @@ class ConvertAddAiTests(unittest.TestCase):
         from arme2cosmos.model import XmlNode
         em = Emitter.__new__(Emitter)
         em.notes, em.addons, em.symbols, em.player_var = [], set(), {}, None
+        em.hullmap = None
         line = em.c_neutral(XmlNode("create", {"type": "neutral", "x": "1", "y": "0",
                                                "z": "2", "name": '"Used" Scout'}))[0]
         self.assertIn(r'name="\"Used\" Scout"', line)

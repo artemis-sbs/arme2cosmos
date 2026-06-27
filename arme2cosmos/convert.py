@@ -145,10 +145,11 @@ def build_notes(mission: Mission, em: Emitter) -> str:
     return "\n".join(lines) + "\n"
 
 
-def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSION) -> str:
+def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSION,
+                 hullmap: dict | None = None) -> str:
     """Convert one mission XML; write a scaffold dir under out_root. Returns the dir."""
     mission = parse_file(path)
-    em = Emitter(mission)
+    em = Emitter(mission, hullmap=hullmap)
 
     story = build_story_mast(mission, em)  # run first so em.addons/notes are populated
     files = {

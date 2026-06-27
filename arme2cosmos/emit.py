@@ -31,12 +31,21 @@ _MONSTER_ART = "monster_charbdis"
 
 
 class Emitter:
-    def __init__(self, mission: Mission):
+    def __init__(self, mission: Mission, hullmap: dict | None = None):
         self.mission = mission
+        self.hullmap = hullmap  # optional vesselData<->shipDataBB crosswalk
         self.notes: list[str] = []  # punch-list lines for MIGRATION_NOTES.md
         self.addons: set[str] = set()  # feature-detected story.json mastlibs
         self.symbols: dict[str, str] = {}  # 2.8 object name -> MAST variable
         self.player_var: str | None = None  # MAST var holding the player ship
+
+    def _art(self, n: XmlNode, default: str) -> str:
+        """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),
+        falling back to *default* (a placeholder) when there is no match."""
+        from .artmap import resolve_art
+        key = resolve_art(self.hullmap, hull_id=n.get("hullID"),
+                          race_keys=n.get("raceKeys"), hull_keys=n.get("hullKeys"))
+        return key or default
 
     # -- helpers --------------------------------------------------------------
     def note(self, msg: str) -> None:
@@ -84,9 +93,11 @@ class Emitter:
 
     def c_station(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
-        self.note(f"verify station art for {n.get('name','?')} "
-                  f"(hullID={n.get('hullID')} race={n.get('raceKeys')})")
-        return [self._assign(n, f'a2x_create_station({x}, {y}, {z}, "{_STATION_ART}", '
+        art = self._art(n, _STATION_ART)
+        if art == _STATION_ART:
+            self.note(f"verify station art for {n.get('name','?')} "
+                      f"(hullID={n.get('hullID')} race={n.get('raceKeys')})")
+        return [self._assign(n, f'a2x_create_station({x}, {y}, {z}, "{art}", '
                 f'side="{self._side(n)}"{self._name_kw(n)})')]
 
     def c_enemy(self, n: XmlNode) -> list[str]:
@@ -95,14 +106,17 @@ class Emitter:
         fleet = n.get("fleetnumber")
         if fleet:
             side = f"enemy, fleet_{fleet}"  # role so if_fleet_count can await it
-        self.note(f"verify enemy art for {n.get('name','?')} "
-                  f"(hullID={n.get('hullID')} race={n.get('raceKeys')})")
-        return [self._assign(n, f'a2x_create_enemy({x}, {y}, {z}, "{_ENEMY_ART}", '
+        art = self._art(n, _ENEMY_ART)
+        if art == _ENEMY_ART:
+            self.note(f"verify enemy art for {n.get('name','?')} "
+                      f"(hullID={n.get('hullID')} race={n.get('raceKeys')})")
+        return [self._assign(n, f'a2x_create_enemy({x}, {y}, {z}, "{art}", '
                 f'side="{side}"{self._name_kw(n)})')]
 
     def c_neutral(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
-        return [self._assign(n, f'a2x_create_neutral({x}, {y}, {z}, "{_NEUTRAL_ART}", '
+        art = self._art(n, _NEUTRAL_ART)
+        return [self._assign(n, f'a2x_create_neutral({x}, {y}, {z}, "{art}", '
                 f'side="{self._side(n)}"{self._name_kw(n)})')]
 
     def c_player(self, n: XmlNode) -> list[str]:

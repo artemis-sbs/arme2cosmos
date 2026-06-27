@@ -53,13 +53,32 @@ def _cmd_convert(args: argparse.Namespace) -> int:
     if not files:
         print(f"No mission .xml files found under: {args.path}", file=sys.stderr)
         return 2
+    hullmap = None
+    if args.hullmap:
+        with open(args.hullmap, encoding="utf-8") as hf:
+            hullmap = json.load(hf)
     for f in files:
         try:
-            out = convert_file(f, args.out, args.lib_version)
+            out = convert_file(f, args.out, args.lib_version, hullmap)
         except Exception as exc:  # noqa: BLE001
             print(f"!! failed to convert {f}: {exc}", file=sys.stderr)
             continue
         print(f"scaffolded {os.path.basename(f)} -> {out}")
+    return 0
+
+
+def _cmd_artmap(args: argparse.Namespace) -> int:
+    from .artmap import generate
+    try:
+        hullmap, stats = generate(args.vesseldata, args.shipdata)
+    except FileNotFoundError as exc:
+        print(f"!! {exc}", file=sys.stderr)
+        return 2
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(hullmap, f, indent=2)
+    print(f"hullmap -> {args.out}")
+    print(f"  vessels={stats['vessels']} hulls={stats['hulls']} "
+          f"matched={stats['matched']} unmatched={stats['unmatched']}")
     return 0
 
 
@@ -91,11 +110,17 @@ def build_parser() -> argparse.ArgumentParser:
     conv.add_argument("--out", default="out", help="output root directory (default: out/)")
     conv.add_argument("--lib-version", default="v1.4.0_dev",
                       help="sbslib/mastlib version tag for story.json (default: v1.4.0_dev)")
+    conv.add_argument("--hullmap", default=None,
+                      help="hullmap.json (from `artmap`) to resolve real ship art")
     conv.set_defaults(func=_cmd_convert)
 
-    art = sub.add_parser("artmap", help="draft the vesselData<->shipDataBB crosswalk (planned)")
-    art.add_argument("path", nargs="?", default=".")
-    art.set_defaults(func=_cmd_stub, _name="artmap")
+    art = sub.add_parser("artmap", help="draft the vesselData<->shipDataBB hull crosswalk")
+    art.add_argument("--vesseldata", default="/f/a/a28/dat/vesselData.xml",
+                     help="path to the Artemis 2.8 vesselData.xml")
+    art.add_argument("--shipdata", default="/f/a/Cosmos-1-3-0/data/shipDataBB.json",
+                     help="path to the Cosmos shipDataBB.json")
+    art.add_argument("--out", default="hullmap.json", help="output hullmap path")
+    art.set_defaults(func=_cmd_artmap)
 
     return p
 
