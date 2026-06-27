@@ -69,7 +69,7 @@ class Emitter:
 
     def _name_kw(self, n: XmlNode) -> str:
         nm = n.get("name")
-        return f', name="{nm}"' if nm else ""
+        return f', name="{_mast_str(nm)}"' if nm else ""
 
     # -- command emitters -----------------------------------------------------
     def emit_command(self, n: XmlNode) -> list[str]:
@@ -110,7 +110,7 @@ class Emitter:
         self.addons.update({"consoles", "fleets"})
         self.note("player ship: a2x_create_player is a scaffold; prefer the consoles/"
                   "fleets addon (PLAYER_LIST + spawn_players) for real console wiring")
-        nm = n.get("name") or "Artemis"
+        nm = _mast_str(n.get("name") or "Artemis")
         self.player_var = "player_ship"
         if n.get("name"):
             self._var_for(n.get("name"))  # also resolvable by name

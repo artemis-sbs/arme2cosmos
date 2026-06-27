@@ -141,6 +141,18 @@ class ConvertAddAiTests(unittest.TestCase):
         self.assertIn('a2x_add_ai(obj_bruce, "CHASE_PLAYER")', story)
         self.assertIn("a2x_clear_ai(obj_bruce)", story)
 
+    def test_names_with_quotes_are_escaped(self):
+        # regression: a 2.8 name containing double quotes must not break the MAST
+        # string literal (found by compile-checking the corpus).
+        from arme2cosmos.emit import Emitter
+        from arme2cosmos.model import XmlNode
+        em = Emitter.__new__(Emitter)
+        em.notes, em.addons, em.symbols, em.player_var = [], set(), {}, None
+        line = em.c_neutral(XmlNode("create", {"type": "neutral", "x": "1", "y": "0",
+                                               "z": "2", "name": '"Used" Scout'}))[0]
+        self.assertIn(r'name="\"Used\" Scout"', line)
+        self.assertNotIn('name=""Used"', line)
+
     def test_unmapped_ai_still_emits_call(self):
         # GUARD_STATION has no brain; still emitted (a2x_add_ai no-ops) + noted.
         self.assertIn('a2x_add_ai(obj_bruce, "GUARD_STATION")', self._story())
