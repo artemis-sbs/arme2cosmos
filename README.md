@@ -15,11 +15,14 @@ Implemented:
 - **`report`** — read-only coverage analysis. Parses a mission (or a whole corpus),
   classifies every command/condition against the 2.8→MAST mapping table, and prints a
   confidence meter + punch-list. Writes nothing.
-
-Planned (stubs present):
 - **`convert`** — scaffold a Cosmos MAST mission (`story.mast`, `script.py`,
-  `story.json`, `description.yaml`, `MIGRATION_NOTES.md`).
-- **`artmap`** — draft the `vesselData.xml` ↔ `shipDataBB.json` hull crosswalk.
+  `story.json`, `description.yaml`, `MIGRATION_NOTES.md`). The create family translates
+  to real `a2x_*` calls; everything else is `# TODO`-marked with the original XML
+  inline and collected into the notes. Events become a linear chain of `---` labels.
+
+Planned (stub present):
+- **`artmap`** — draft the `vesselData.xml` ↔ `shipDataBB.json` hull crosswalk (would
+  replace the placeholder ship art the converter currently emits).
 
 ## Usage
 
@@ -32,6 +35,9 @@ python -m arme2cosmos report path/to/a28/dat/missions
 
 # Machine-readable
 python -m arme2cosmos report <path> --json
+
+# Scaffold a mission (or a whole corpus) into out/
+python -m arme2cosmos convert path/to/MISS_Foo --out out/
 ```
 
 Coverage statuses: `full` (mechanical), `partial` (emits a `# TODO`), `manual`
