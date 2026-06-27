@@ -213,6 +213,44 @@ class Emitter:
             return [f'    # TODO clear_ai on "{n.get("name")}" (object not captured)']
         return [f"    a2x_clear_ai({var})"]
 
+    def c_destroy(self, n: XmlNode) -> list[str]:
+        var = self.symbols.get(n.get("name"))
+        if var is None:
+            self.note(f"destroy '{n.get('name')}' references object not captured "
+                      f"(forward ref / gm-selected / player_slot) -- wire by hand")
+            return [f'    # TODO destroy "{n.get("name")}"']
+        return [f"    a2x_destroy({var})"]
+
+    def c_destroy_near(self, n: XmlNode) -> list[str]:
+        self.note(f"destroy_near type={n.get('type')}: query terrain near a point and "
+                  f"delete -- wire by hand")
+        return [f"    # TODO destroy_near: {_xml_repr(n)}"]
+
+    def c_direct(self, n: XmlNode) -> list[str]:
+        var = self.symbols.get(n.get("name"))
+        if var is None:
+            return [f'    # TODO direct "{n.get("name")}" (object not captured)']
+        thr = n.get("scriptThrottle", "1.0")
+        tname = n.get("targetName")
+        if tname:
+            tvar = self.symbols.get(tname)
+            if tvar:
+                return [f"    target({var}, to_id({tvar}), throttle={thr})"]
+            return [f'    # TODO direct {var} toward "{tname}" (target not captured)']
+        px, py, pz = n.get("pointX", "0"), n.get("pointY", "0"), n.get("pointZ", "0")
+        return [f"    target_pos({var}, *a2x_pos({px}, {py}, {pz}), {thr})"]
+
+    def c_set_object_property(self, n: XmlNode) -> list[str]:
+        var = self.symbols.get(n.get("name"))
+        prop, val = n.get("property", "?"), n.get("value", "0")
+        self.note(f"set_object_property {prop}={val} on '{n.get('name','?')}': 2.8 "
+                  f"property names differ from Cosmos data_set keys -- map by hand "
+                  f"(see object_data_documentation.txt)")
+        if var is None:
+            return [f"    # TODO set_object_property {prop}={val}: {_xml_repr(n)}"]
+        return [f'    # TODO {var}.data_set.set("<cosmos_key>", {val})  '
+                f'# 2.8 property "{prop}"']
+
     def c_incoming_message(self, n: XmlNode) -> list[str]:
         frm = _mast_str(n.get("from", ""))
         fn = _mast_str(n.get("fileName", ""))
@@ -265,6 +303,10 @@ _COMMAND_EMIT = {
     "set_difficulty_level": Emitter.c_set_difficulty,
     "add_ai": Emitter.c_add_ai,
     "clear_ai": Emitter.c_clear_ai,
+    "destroy": Emitter.c_destroy,
+    "destroy_near": Emitter.c_destroy_near,
+    "direct": Emitter.c_direct,
+    "set_object_property": Emitter.c_set_object_property,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
     "incoming_message": Emitter.c_incoming_message,

@@ -164,5 +164,48 @@ class ConvertAddAiTests(unittest.TestCase):
             self.assertIn("ai", f.read())
 
 
+DIRECT_SAMPLE = """<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>directing</mission_description>
+  <start>
+    <create type="neutral" x="1000" y="0" z="2000" name="Amb" sideValue="0"/>
+    <create type="enemy" x="5000" y="0" z="6000" name="Foe" sideValue="1"/>
+  </start>
+  <event name="Move">
+    <if_variable name="go" comparator="EQUALS" value="1"/>
+    <direct name="Amb" pointX="0" pointY="0" pointZ="0" scriptThrottle="0.5"/>
+    <direct name="Foe" targetName="Amb" scriptThrottle="1.0"/>
+    <destroy name="Amb"/>
+  </event>
+</mission_data>
+"""
+
+
+class ConvertDirectDestroyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.xml = os.path.join(self.tmp.name, "MISS_Dir.xml")
+        with open(self.xml, "w", encoding="utf-8") as f:
+            f.write(DIRECT_SAMPLE)
+        self.out = os.path.join(self.tmp.name, "out")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _story(self):
+        d = convert_file(self.xml, self.out)
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_direct_to_point_uses_flipped_coords(self):
+        self.assertIn("target_pos(obj_amb, *a2x_pos(0, 0, 0), 0.5)", self._story())
+
+    def test_direct_to_target_resolves_both(self):
+        self.assertIn("target(obj_foe, to_id(obj_amb), throttle=1.0)", self._story())
+
+    def test_destroy_resolves_var(self):
+        self.assertIn("a2x_destroy(obj_amb)", self._story())
+
+
 if __name__ == "__main__":
     unittest.main()
