@@ -115,9 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
     conv.set_defaults(func=_cmd_convert)
 
     art = sub.add_parser("artmap", help="draft the vesselData<->shipDataBB hull crosswalk")
-    art.add_argument("--vesseldata", default="/f/a/a28/dat/vesselData.xml",
+    art.add_argument("--vesseldata", required=True,
                      help="path to the Artemis 2.8 vesselData.xml")
-    art.add_argument("--shipdata", default="/f/a/Cosmos-1-3-0/data/shipDataBB.json",
+    art.add_argument("--shipdata", required=True,
                      help="path to the Cosmos shipDataBB.json")
     art.add_argument("--out", default="hullmap.json", help="output hullmap path")
     art.set_defaults(func=_cmd_artmap)
