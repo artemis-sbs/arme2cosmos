@@ -36,6 +36,7 @@ class Emitter:
         self.notes: list[str] = []  # punch-list lines for MIGRATION_NOTES.md
         self.addons: set[str] = set()  # feature-detected story.json mastlibs
         self.symbols: dict[str, str] = {}  # 2.8 object name -> MAST variable
+        self.player_var: str | None = None  # MAST var holding the player ship
 
     # -- helpers --------------------------------------------------------------
     def note(self, msg: str) -> None:
@@ -110,8 +111,11 @@ class Emitter:
         self.note("player ship: a2x_create_player is a scaffold; prefer the consoles/"
                   "fleets addon (PLAYER_LIST + spawn_players) for real console wiring")
         nm = n.get("name") or "Artemis"
-        expr = f'a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", name="{nm}")'
-        return [self._assign(n, expr) if n.get("name") else f"    {expr}"]
+        self.player_var = "player_ship"
+        if n.get("name"):
+            self._var_for(n.get("name"))  # also resolvable by name
+            self.symbols[n.get("name")] = "player_ship"
+        return [f'    player_ship = a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", name="{nm}")']
 
     def c_monster(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
@@ -255,21 +259,65 @@ _COMMAND_EMIT = {
 
 
 # --- condition emitters (for event entry) -----------------------------------
-def emit_condition(em: Emitter, n: XmlNode) -> list[str]:
+_LESS_CMP = {"<", "<=", "LESS", "LESS_EQUAL", "EQUALS", "="}
+
+
+def _is_less(comparator: str) -> bool:
+    """2.8 distance comparator -> True if the wait is 'until closer than value'."""
+    return (comparator or "").strip() in _LESS_CMP
+
+
+def _resolve_obj(em: Emitter, name: str | None, slot: str | None) -> str:
+    """A MAST handle for a condition's object reference (name or player slot)."""
+    if name and name in em.symbols:
+        return em.symbols[name]
+    if slot is not None or name is None:
+        return em.player_var or 'role("__player__")'
+    return em.symbols.get(name) or f'role("{name}")'  # unknown -> best-effort role
+
+
+def emit_condition(em: Emitter, n: XmlNode, idx: int = 0) -> list[str]:
     """Translate an event condition into a wait/guard line (best-effort)."""
     tag = n.tag
     if tag == "if_fleet_count":
         fl = n.get("fleetnumber")
         if fl and (n.get("comparator", "") in ("<=", "LESS_EQUAL")) and n.get("value") in ("0", "0.0"):
             return [f'    await destroyed_all(role("fleet_{fl}"))']
+        return [f"    # when: fleet {fl} count {n.get('comparator','')} {n.get('value','')}"]
     if tag == "if_docked":
-        return [f'    # when: player docked with {n.get("name","?")} '
-                f'(await a dock signal / poll dock_state)']
+        who = _resolve_obj(em, n.get("name"), n.get("player_slot"))
+        # which ship docks: the player (player_slot/name=player) -> player_var
+        ship = em.player_var or 'role("__player__")'
+        em.addons.add("docking")
+        return [f"---wait_dock_{idx}",
+                "    await delay_sim(1)",
+                f"    jump wait_dock_{idx} if not a2x_is_docked({ship})"]
     if tag == "if_distance":
-        return [f'    # when: distance {n.get("name1","?")}..{n.get("name2","?")} '
-                f'{n.get("comparator","")} {n.get("value","")}']
+        a = _resolve_obj(em, n.get("name1"), n.get("player_slot1"))
+        val = n.get("value", "0")
+        fn = "distance_less" if _is_less(n.get("comparator")) else "distance_greater"
+        if n.get("name2") or n.get("player_slot2"):
+            b = _resolve_obj(em, n.get("name2"), n.get("player_slot2"))
+            return [f"    await {fn}({a}, {b}, {val})"]
+        px, py, pz = n.get("pointX", "0"), n.get("pointY", "0"), n.get("pointZ", "0")
+        pfn = "distance_point_less" if _is_less(n.get("comparator")) else "distance_point_greater"
+        return [f"    await {pfn}({a}, a2x_pos({px}, {py}, {pz}), {val})"]
+    if tag in ("if_inside_sphere", "if_outside_sphere"):
+        o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
+        cx, cy, cz = n.get("centerX", "0"), n.get("centerY", "0"), n.get("centerZ", "0")
+        r = n.get("radius", "0")
+        fn = "distance_point_less" if tag == "if_inside_sphere" else "distance_point_greater"
+        return [f"    await {fn}({o}, a2x_pos({cx}, {cy}, {cz}), {r})"]
+    if tag in ("if_inside_box", "if_outside_box"):
+        o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
+        inside = "True" if tag == "if_inside_box" else "False"
+        return [f'    # guard: a2x_in_box({o}, {n.get("leastX","0")}, {n.get("leastZ","0")}, '
+                f'{n.get("mostX","0")}, {n.get("mostZ","0")}, inside={inside})']
+    if tag in ("if_exists", "if_not_exists"):
+        o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
+        neg = "not " if tag == "if_exists" else ""
+        return [f"    ->END if {neg}object_exists({o})"]
     if tag == "if_variable":
-        # flag guard -- in a linear chain the sequencing usually subsumes this
         return [f'    # guard: {_pyname(n.get("name"))} {n.get("comparator","")} {n.get("value","")}']
     if tag == "if_timer_finished":
         return [f'    await is_timer_finished(0, "{n.get("name")}")']

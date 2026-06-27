@@ -57,7 +57,7 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
     for i, ev in enumerate(mission.events):
         lines.append(f"--- event_{i}" + (f"   # {ev.name}" if ev.name != f"event_{i}" else ""))
         for c in ev.conditions:
-            lines.extend(emit_condition(em, c))
+            lines.extend(emit_condition(em, c, i))
         for n in ev.commands:
             lines.append(f"    # {_xml_one(n)}")
             lines.extend(em.emit_command(n))

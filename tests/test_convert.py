@@ -96,6 +96,12 @@ class ConvertTests(unittest.TestCase):
         self.assertIn("obj_ds1 = a2x_create_station", story)
         self.assertIn("obj_kr01 = a2x_create_enemy", story)
 
+    def test_if_docked_becomes_dock_wait(self):
+        _, story, sjson = self._convert()
+        self.assertIn("---wait_dock_0", story)
+        self.assertIn("a2x_is_docked(player_ship)", story)
+        self.assertIn("docking", sjson)  # if_docked pulls the docking addon
+
 
 ADD_AI_SAMPLE = """<?xml version="1.0" ?>
 <mission_data version="2.8">
