@@ -9,6 +9,8 @@ internally); everything not mechanically translatable is emitted as a
 
 from __future__ import annotations
 
+import re
+
 from .coverage import classify, FULL, PARTIAL
 from .model import Event, Mission, XmlNode
 
@@ -19,6 +21,17 @@ _SIDE = {"0": "neutral", "1": "enemy", "2": "friendly"}
 # Others emit the call but a2x_add_ai is a no-op for them -> flagged in notes.
 _AI_MAPPED = {"CHASE_PLAYER", "CHASE_STATION", "CHASE_AI_SHIP", "CHASE_NEUTRAL",
               "ATTACK", "TARGET_THROTTLE"}
+
+# 2.8 set_object_property names with a confirmed Cosmos mapping (mirror of a2x.props).
+# These emit a real a2x_set_object_property call; the rest stay # TODO. See
+# docs/property_map.md for the full table and the VERIFY/HUMAN rows.
+_AUTO_PROPS = {
+    "angleDelta", "rollDelta", "pitchDelta", "turnRate", "throttle", "artScale",
+    "energy", "hasSurrendered", "shieldsOn", "shieldStateFront", "shieldStateBack",
+    "shieldMaxStateFront", "shieldMaxStateBack", "missileStoresNuke",
+    "missileStoresHoming", "missileStoresMine", "missileStoresEMP", "countNuke",
+    "countHoming", "countMine", "countEMP",
+}
 
 # Tiny starter hull/art crosswalk. The real table is the tool's `artmap`
 # (vesselData.xml <-> shipDataBB.json); these are sensible placeholders so output
@@ -172,8 +185,7 @@ class Emitter:
 
     def c_set_variable(self, n: XmlNode) -> list[str]:
         name = n.get("name")
-        val = n.get("value", "0")
-        return [f"    {_pyname(name)} = {val}"]
+        return [f"    {_pyname(name)} = {_value(n.get('value', '0'))}"]
 
     def c_set_timer(self, n: XmlNode) -> list[str]:
         return [f'    set_timer(0, "{n.get("name")}", seconds={n.get("seconds", "0")})']
@@ -243,9 +255,10 @@ class Emitter:
     def c_set_object_property(self, n: XmlNode) -> list[str]:
         var = self.symbols.get(n.get("name"))
         prop, val = n.get("property", "?"), n.get("value", "0")
-        self.note(f"set_object_property {prop}={val} on '{n.get('name','?')}': 2.8 "
-                  f"property names differ from Cosmos data_set keys -- map by hand "
-                  f"(see object_data_documentation.txt)")
+        if var is not None and prop in _AUTO_PROPS:
+            return [f'    a2x_set_object_property({var}, "{prop}", {_value(val)})']
+        self.note(f"set_object_property {prop}={val} on '{n.get('name','?')}': no "
+                  f"confirmed Cosmos mapping yet -- see docs/property_map.md")
         if var is None:
             return [f"    # TODO set_object_property {prop}={val}: {_xml_repr(n)}"]
         return [f'    # TODO {var}.data_set.set("<cosmos_key>", {val})  '
@@ -339,6 +352,19 @@ def _mast_str(s: str) -> str:
     s = (s or "").replace("\\", "\\\\").replace('"', '\\"')
     s = s.replace("\r", " ").replace("\n", " ").strip()
     return s
+
+
+def _value(v: str) -> str:
+    """Normalize a 2.8 attribute value for use as MAST/Python code.
+
+    2.8 allows leading-zero integers (``01``), which are a syntax error in Python 3;
+    normalize those. Anything else (decimals, expressions like ``1/100``, variables)
+    passes through unchanged.
+    """
+    v = (v or "0").strip()
+    if re.fullmatch(r"-?0[0-9]+", v):
+        return str(int(v))
+    return v
 
 
 def _pyname(name: str) -> str:
