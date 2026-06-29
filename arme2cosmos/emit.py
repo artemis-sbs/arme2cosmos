@@ -28,6 +28,10 @@ _AI_MAPPED = {"CHASE_PLAYER", "CHASE_STATION", "CHASE_AI_SHIP", "CHASE_NEUTRAL",
 # 2.8 set_special abilities with a Cosmos elite_* flag (mirror of a2x.props).
 _ELITE_ABILITIES = {"Stealth", "LowVis", "Drones", "AntiMine", "AntiTorp"}
 
+# 2.8 global difficulty props (no object) -> fleet coefficients (mirror of a2x.props).
+_FLEET_COEFF = {"nonPlayerSpeed", "nonPlayerShield", "nonPlayerWeapon",
+                "playerShields", "playerWeapon"}
+
 _AUTO_PROPS = {
     "positionX", "positionY", "positionZ",
     "angleDelta", "rollDelta", "pitchDelta", "turnRate", "throttle", "artScale",
@@ -276,6 +280,9 @@ class Emitter:
     def c_set_object_property(self, n: XmlNode) -> list[str]:
         var = self.symbols.get(n.get("name"))
         prop, val = n.get("property", "?"), n.get("value", "0")
+        # global difficulty knobs (no object name): nonPlayer*/player* -> fleet coeffs
+        if n.get("name") is None and prop in _FLEET_COEFF:
+            return [f'    a2x_set_fleet_coeff("{prop}", {_value(val)})']
         if var is not None and prop in _AUTO_PROPS:
             return [f'    a2x_set_object_property({var}, "{prop}", {_value(val)})']
         self.note(f"set_object_property {prop}={val} on '{n.get('name','?')}': no "
