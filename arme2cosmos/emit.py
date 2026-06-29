@@ -71,6 +71,9 @@ class Emitter:
         # flags consumed by a //signal-converted event: set_variable on these also
         # emits the signal that drives the route (set by build_story_mast).
         self.signal_flags: set[str] = set()
+        # how events were translated (set by build_story_mast, used by build_notes).
+        self.event_summary: dict[str, int] = {}
+        self.event_model: str = "hybrid"
 
     def _art(self, n: XmlNode, default: str) -> str:
         """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),

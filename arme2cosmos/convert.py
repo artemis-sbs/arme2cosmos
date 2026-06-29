@@ -115,6 +115,12 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     em.signal_flags = {_pyname(_flag_signal(ev).get("name")) for ev in flag_events}
     if dock_events:
         em.addons.add("docking")
+    em.event_model = event_model
+    em.event_summary = {
+        "scene chain": len(seq_events), "polling loops": len(loop_events),
+        "respawn routes": len(respawn_events), "dock routes": len(dock_events),
+        "flag-signal routes": len(flag_events),
+    }
 
     lines.append("    # --- start block ---")
     for n in mission.start:
@@ -478,10 +484,31 @@ def build_notes(mission: Mission, em: Emitter) -> str:
     else:
         lines.append("- (none)")
     lines.append("")
+    lines.append("## Event model")
+    model_desc = {
+        "hybrid": "**hybrid** (default): flag-chained scene events form a linear chain; "
+                  "independent events run as concurrent polling loops that re-fire each "
+                  "tick, and single-trigger ones became event-driven routes instead of "
+                  "polling. Multi-condition events stay loops on purpose.",
+        "linear": "**linear**: every event folded into one sequential chain.",
+        "a28_compatible": "**a28_compatible**: every event is its own continuous polling "
+                          "task (the faithful 2.8 flat-event model -- no chain, no routes).",
+    }.get(em.event_model, em.event_model)
+    lines.append(f"- Model: {model_desc}")
+    if em.event_summary:
+        parts = [f"{v} {k}" for k, v in em.event_summary.items() if v]
+        if parts:
+            lines.append(f"- Translated as: {', '.join(parts)}.")
+    lines.append("- Verify scene order matches the original 2.8 flag logic. Respawn "
+                 "(`//damage/destroy`), dock (`//signal/ship_docked`) and flag "
+                 "(`//signal/a2x_flag_*`) routes fire on engine events -- confirm they "
+                 "trigger as intended.")
+    lines.append("- If event behaviour looks wrong, regenerate with "
+                 "`--event-model a28_compatible` (faithful fallback) or `--event-model linear`.")
+    lines.append("")
     lines.append("## Reminders")
     lines.append("- Headings from 2.8 `angle` are not yet applied (a2x_angle exists if needed).")
-    lines.append("- Ship art is placeholder; resolve via the hull crosswalk (artmap).")
-    lines.append("- Events are chained linearly; verify the order matches the original flags.")
+    lines.append("- Ship art uses the hull crosswalk (artmap); unmatched hulls use a placeholder.")
     return "\n".join(lines) + "\n"
 
 
