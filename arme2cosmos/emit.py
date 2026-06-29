@@ -29,6 +29,7 @@ _AI_MAPPED = {"CHASE_PLAYER", "CHASE_STATION", "CHASE_AI_SHIP", "CHASE_NEUTRAL",
 _ELITE_ABILITIES = {"Stealth", "LowVis", "Drones", "AntiMine", "AntiTorp"}
 
 _AUTO_PROPS = {
+    "positionX", "positionY", "positionZ",
     "angleDelta", "rollDelta", "pitchDelta", "turnRate", "throttle", "artScale",
     "energy", "hasSurrendered", "shieldsOn", "shieldStateFront", "shieldStateBack",
     "shieldMaxStateFront", "shieldMaxStateBack", "missileStoresNuke",
