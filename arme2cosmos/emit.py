@@ -94,10 +94,11 @@ class Emitter:
         return var
 
     def _assign(self, n: XmlNode, expr: str) -> str:
-        """Indented line; captures the spawn into a variable when the object is named."""
+        """Indented line; captures the spawn into a `shared` variable when the object is
+        named (shared so concurrent independent-event tasks can resolve it too)."""
         name = n.get("name")
         if name:
-            return f"    {self._var_for(name)} = {expr}"
+            return f"    shared {self._var_for(name)} = {expr}"
         return f"    {expr}"
 
     def _xyz(self, n: XmlNode, px="x", py="y", pz="z"):
@@ -159,7 +160,7 @@ class Emitter:
         if n.get("name"):
             self._var_for(n.get("name"))  # also resolvable by name
             self.symbols[n.get("name")] = "player_ship"
-        return [f'    player_ship = a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", name="{nm}")']
+        return [f'    shared player_ship = a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", name="{nm}")']
 
     def c_generic(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)

@@ -21,6 +21,7 @@ SAMPLE = """<?xml version="1.0" ?>
     <create type="enemy" x="70000" y="0" z="45000" name="KR01" sideValue="1" fleetnumber="1"/>
   </event>
   <event name="End">
+    <if_variable name="a1" comparator="EQUALS" value="1"/>
     <if_fleet_count comparator="LESS_EQUAL" value="0" fleetnumber="1" sideValue="1"/>
     <end_mission/>
   </event>
@@ -252,9 +253,11 @@ class ConvertCommsButtonTests(unittest.TestCase):
 
     def test_button_event_excluded_from_chain(self):
         story = self._story()
-        # the linear chain should only contain the non-button event
-        self.assertNotIn("--- event_1", story)  # only one chain event remains
-        self.assertIn("--- event_0", story)
+        # the comms-button event lives in the //comms route (its handler body indented 8),
+        # not as a chain/task event; the non-button event is emitted once elsewhere.
+        self.assertIn('+ "Request Bounty":', story)
+        self.assertIn("        a2x_big_message", story)
+        self.assertEqual(story.count("done = 1"), 1)
 
     def test_quick_wins_log_sound_griddamage(self):
         from arme2cosmos.emit import Emitter

@@ -51,9 +51,9 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
     lines.append("    shared main_story_task = mast_task")
     obj_vars = sorted(set(em.symbols.values()) | ({em.player_var} if em.player_var else set()))
     if obj_vars:
-        lines.append("    # objects forward-declared so references resolve before/across creates")
+        lines.append("    # objects forward-declared (shared so concurrent event tasks see them)")
         for v in obj_vars:
-            lines.append(f"    default {v} = None")
+            lines.append(f"    shared {v} = None")
     lines.append("")
     lines.append("    # --- start block ---")
     for n in mission.start:
@@ -65,7 +65,7 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
     # gated to the gamemaster console), not linear-chain labels.
     comms_btn_events: dict[str, object] = {}
     gm_btn_events: dict[str, object] = {}
-    chain_events = []
+    plain_events = []
     for ev in mission.events:
         cb = next((c for c in ev.conditions if c.tag == "if_comms_button"), None)
         gb = next((c for c in ev.conditions if c.tag == "if_gm_button"), None)
@@ -74,9 +74,20 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
         elif gb is not None:
             gm_btn_events.setdefault(gb.get("text", ""), ev)
         else:
-            chain_events.append(ev)
+            plain_events.append(ev)
 
-    for i, ev in enumerate(chain_events):
+    # Split flag-chained (sequential scene) events from independent ones. 2.8 events
+    # are all concurrent; the chain is kept linear for readability, the independent
+    # ones run as concurrent tasks (matching the flat 2.8 semantics).
+    seq_events, indep_events = _classify_events(plain_events)
+
+    if indep_events:
+        lines.append("    # independent events -> concurrent tasks (2.8 flat-event model)")
+        for i, _ev in enumerate(indep_events):
+            lines.append(f"    task_schedule(ind_event_{i})")
+        lines.append("")
+
+    for i, ev in enumerate(seq_events):
         lines.append(f"--- event_{i}" + (f"   # {ev.name}" if ev.name != f"event_{i}" else ""))
         for c in ev.conditions:
             lines.extend(emit_condition(em, c, i))
@@ -85,8 +96,18 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
             lines.extend(em.emit_command(n))
         lines.append("")
 
-    if not chain_events:
+    lines.append("    ->END")  # end the map task before the independent task labels
+
+    for i, ev in enumerate(indep_events):
+        nm = f"   # {ev.name}" if ev.name != f"event_{i}" else ""
+        lines.append(f"=== ind_event_{i}{nm}")
+        for c in ev.conditions:
+            lines.extend(emit_condition(em, c, 1000 + i))  # distinct wait-label scope
+        for n in ev.commands:
+            lines.append(f"    # {_xml_one(n)}")
+            lines.extend(em.emit_command(n))
         lines.append("    ->END")
+        lines.append("")
 
     lines.extend(build_button_route(
         mission, em, comms_btn_events, set_tag="set_comms_button",
@@ -121,6 +142,44 @@ def _prescan_named_objects(mission: Mission, em: Emitter) -> None:
             em.symbols.setdefault(name, "player_ship")
         elif kind in _CAPTURED_CREATES:
             em._var_for(name)
+
+
+def _truthy(v: str) -> bool:
+    try:
+        return float(v) != 0
+    except (TypeError, ValueError):
+        return bool(v and v.strip())
+
+
+def _event_flags(ev):
+    """(flags this event SETS to a truthy value, flags it WAITS on == truthy)."""
+    sets = {c.get("name") for c in ev.commands
+            if c.tag == "set_variable" and _truthy(c.get("value"))}
+    needs = {c.get("name") for c in ev.conditions
+             if c.tag == "if_variable"
+             and (c.get("comparator", "") or "").strip().upper() in ("EQUALS", "=")
+             and _truthy(c.get("value"))}
+    return sets, needs
+
+
+def _classify_events(events):
+    """Split events into (sequential, independent).
+
+    An event is *sequential* (kept in the linear scene chain) if it is flag-linked to
+    another event -- it waits on a flag an earlier event sets, or it sets a flag a
+    later event waits on. Otherwise it is *independent* (its trigger is external --
+    a timer/distance/dock, not gated by the chain) and is scheduled as its own task.
+    """
+    flags = [_event_flags(ev) for ev in events]
+    sets_l = [s for s, _ in flags]
+    needs_l = [n for _, n in flags]
+    seq, indep = [], []
+    for i, ev in enumerate(events):
+        sets, needs = flags[i]
+        consumes_prior = any(needs & sets_l[j] for j in range(i))
+        feeds_later = any(sets & needs_l[j] for j in range(i + 1, len(events)))
+        (seq if (consumes_prior or feeds_later) else indep).append(ev)
+    return seq, indep
 
 
 def _button_body(em: Emitter, ev, handler_tag: str) -> list[str]:
