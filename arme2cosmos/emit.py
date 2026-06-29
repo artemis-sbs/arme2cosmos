@@ -348,6 +348,36 @@ class Emitter:
     def c_clear_gm_button(self, n: XmlNode) -> list[str]:
         return [f'    # clear_gm_button "{n.get("text","")}"']
 
+    def c_addto_object_property(self, n: XmlNode) -> list[str]:
+        var = self.symbols.get(n.get("name"))
+        prop, val = n.get("property", "?"), n.get("value", "0")
+        if var is not None and prop in _AUTO_PROPS:
+            return [f'    a2x_addto_object_property({var}, "{prop}", {_value(val)})']
+        self.note(f"addto_object_property {prop} on '{n.get('name','?')}': "
+                  f"unmapped property -- see docs/property_map.md")
+        return [f"    # TODO addto_object_property {prop}+={val}: {_xml_repr(n)}"]
+
+    def c_copy_object_property(self, n: XmlNode) -> list[str]:
+        src, dst = self.symbols.get(n.get("name1")), self.symbols.get(n.get("name2"))
+        prop = n.get("property", "?")
+        if src is not None and dst is not None and prop in _AUTO_PROPS:
+            return [f'    a2x_copy_object_property({src}, {dst}, "{prop}")']
+        return [f"    # TODO copy_object_property {prop}: {_xml_repr(n)}"]
+
+    def c_set_ship_text(self, n: XmlNode) -> list[str]:
+        var = self.symbols.get(n.get("name"))
+        if var is None:
+            return [f"    # TODO set_ship_text: {_xml_repr(n)}"]
+        kw = {"newname": "name", "race": "race", "class": "ship_class",
+              "desc": "desc", "scan_desc": "scan_desc", "hailtext": "hail"}
+        args = [f'{kw[a]}="{_mast_str(n.get(a))}"' for a in kw if n.get(a) is not None]
+        if not args:
+            return [f"    # set_ship_text (no mappable fields): {_xml_repr(n)}"]
+        if any(n.get(a) is not None for a in ("scan_desc", "hailtext")):
+            self.note("set_ship_text scan_desc/hailtext have no data_set key "
+                      "(handle via science scan / comms hail)")
+        return [f'    a2x_set_ship_text({var}, {", ".join(args)})']
+
     def c_set_special(self, n: XmlNode) -> list[str]:
         var = self.symbols.get(n.get("name"))
         ability = n.get("ability")
@@ -449,6 +479,9 @@ _COMMAND_EMIT = {
     "destroy_near": Emitter.c_destroy_near,
     "direct": Emitter.c_direct,
     "set_object_property": Emitter.c_set_object_property,
+    "addto_object_property": Emitter.c_addto_object_property,
+    "copy_object_property": Emitter.c_copy_object_property,
+    "set_ship_text": Emitter.c_set_ship_text,
     "set_comms_button": Emitter.c_set_comms_button,
     "clear_comms_button": Emitter.c_clear_comms_button,
     "set_gm_button": Emitter.c_set_gm_button,
