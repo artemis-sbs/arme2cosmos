@@ -154,6 +154,15 @@ class Emitter:
             self.symbols[n.get("name")] = "player_ship"
         return [f'    player_ship = a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", name="{nm}")']
 
+    def c_generic(self, n: XmlNode) -> list[str]:
+        x, y, z = self._xyz(n)
+        art = self._art(n, _NEUTRAL_ART)  # raw .dxs mesh has no Cosmos art -> placeholder
+        self.note(f"genericMesh '{n.get('name','?')}': 2.8 raw mesh "
+                  f"({n.get('meshFileName','?')}) has no Cosmos equivalent -- placeholder art")
+        side = self._side(n) if n.get("sideValue") else "generic"
+        return [self._assign(n, f'a2x_create_generic({x}, {y}, {z}, "{art}", '
+                f'side="{side}"{self._name_kw(n)})')]
+
     def c_monster(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
         mt = n.get("monsterType", "0")
@@ -166,11 +175,12 @@ class Emitter:
         x, y, z = self._xyz(n)
         self.addons.add("upgrades")
         pt = n.get("pickupType", "0")
-        return [f'    a2x_create_anomaly({x}, {y}, {z}, {pt})']
+        # capture named anomalies so later destroy/property commands resolve them
+        return [self._assign(n, f"a2x_create_anomaly({x}, {y}, {z}, {pt})")]
 
     def c_black_hole(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
-        return [f'    a2x_create_black_hole({x}, {y}, {z}){self._name_kw(n) and ""}']
+        return [self._assign(n, f"a2x_create_black_hole({x}, {y}, {z})")]
 
     def c_terrain(self, n: XmlNode) -> list[str]:
         # create type=nebulas/asteroids/mines -> a2x bulk terrain
@@ -423,6 +433,7 @@ _COMMAND_EMIT = {
     "create:player": Emitter.c_player,
     "create:monster": Emitter.c_monster,
     "create:whale": Emitter.c_monster,
+    "create:genericMesh": Emitter.c_generic,
     "create:Anomaly": Emitter.c_anomaly,
     "create:anomaly": Emitter.c_anomaly,
     "create:blackHole": Emitter.c_black_hole,
