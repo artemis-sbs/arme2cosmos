@@ -68,6 +68,9 @@ class Emitter:
         self.addons: set[str] = set()  # feature-detected story.json mastlibs
         self.symbols: dict[str, str] = {}  # 2.8 object name -> MAST variable
         self.player_var: str | None = None  # MAST var holding the player ship
+        # flags consumed by a //signal-converted event: set_variable on these also
+        # emits the signal that drives the route (set by build_story_mast).
+        self.signal_flags: set[str] = set()
 
     def _art(self, n: XmlNode, default: str) -> str:
         """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),
@@ -213,7 +216,12 @@ class Emitter:
 
     def c_set_variable(self, n: XmlNode) -> list[str]:
         # shared so concurrent independent-event tasks can read the flag
-        return [f"    shared {_pyname(n.get('name'))} = {_value(n.get('value', '0'))}"]
+        name = _pyname(n.get("name"))
+        out = [f"    shared {name} = {_value(n.get('value', '0'))}"]
+        # if a //signal route listens on this flag, fire the signal too (push)
+        if name in self.signal_flags:
+            out.append(f'    signal_emit("a2x_flag_{name}")')
+        return out
 
     def c_set_timer(self, n: XmlNode) -> list[str]:
         return [f'    set_timer(0, "{n.get("name")}", seconds={n.get("seconds", "0")})']

@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import re
 
-from .emit import Emitter, emit_condition, _mast_str, _pyname, _cond_bool
+from .emit import Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _value
 from .model import Mission
 from .parser import parse_file
 
@@ -63,14 +63,11 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
         for v in flag_vars:
             lines.append(f"    default shared {v} = 0")
     lines.append("")
-    lines.append("    # --- start block ---")
-    for n in mission.start:
-        lines.append(f"    # {_xml_one(n)}")
-        lines.extend(em.emit_command(n))
-    lines.append("")
 
-    # Comms-button and GM-button handler events become //comms buttons (the GM ones
-    # gated to the gamemaster console), not linear-chain labels.
+    # Partition events up front (before the start block, so a set_variable on a
+    # signal-flag there can emit its signal too).
+    # Comms/GM button-handler events become //comms buttons (GM ones gated to the GM
+    # console), not linear-chain labels.
     comms_btn_events: dict[str, object] = {}
     gm_btn_events: dict[str, object] = {}
     plain_events = []
@@ -84,18 +81,42 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
         else:
             plain_events.append(ev)
 
-    # Event model: 'linear' = one sequential scene chain (readable, less faithful);
-    # 'hybrid' (default) = keep flag-chained scenes linear, run independent events as
-    # concurrent tasks (matching 2.8's flat-event semantics).
+    # 'linear' = one sequential scene chain; 'hybrid' (default) = flag-chained scenes
+    # stay linear, independent events run concurrently (2.8's flat-event model).
     if event_model == "linear":
         seq_events, indep_events = plain_events, []
     else:
         seq_events, indep_events = _classify_events(plain_events)
 
-    if indep_events:
-        lines.append("    # independent events -> concurrent tasks (2.8 flat-event model)")
-        for i, _ev in enumerate(indep_events):
+    # Independent events: convert the ones the engine can PUSH into event-driven routes
+    # (respawn-on-destroy, dock, flag-signal) so they don't poll; the rest stay loops.
+    respawn_events, dock_events, flag_events, loop_events = [], [], [], []
+    for ev in indep_events:
+        rn = _respawn_name(ev)
+        if rn and rn in em.symbols:
+            respawn_events.append(ev)
+        elif _is_dock(ev):
+            dock_events.append(ev)
+        elif _flag_signal(ev) is not None:
+            flag_events.append(ev)
+        else:
+            loop_events.append(ev)
+    em.signal_flags = {_pyname(_flag_signal(ev).get("name")) for ev in flag_events}
+    if dock_events:
+        em.addons.add("docking")
+
+    lines.append("    # --- start block ---")
+    for n in mission.start:
+        lines.append(f"    # {_xml_one(n)}")
+        lines.extend(em.emit_command(n))
+    lines.append("")
+
+    if loop_events or respawn_events:
+        lines.append("    # independent events: start polling loops + initial respawns")
+        for i, _ev in enumerate(loop_events):
             lines.append(f"    task_schedule(ind_event_{i})")
+        for j, _ev in enumerate(respawn_events):
+            lines.append(f"    task_schedule(respawn_{j})")  # initial spawn (then routed)
         lines.append("")
 
     for i, ev in enumerate(seq_events):
@@ -107,14 +128,47 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
             lines.extend(em.emit_command(n))
         lines.append("")
 
-    lines.append("    ->END")  # end the map task before the independent task labels
+    lines.append("    ->END")  # end the map task before the route/loop labels
 
-    # Independent events are continuous: a 2.8 event polls its conditions every tick
-    # and FIRES whenever they're true (it never "ends"). So each becomes a polling loop
-    # that re-evaluates live boolean conditions and re-fires -- giving respawn / wave /
-    # periodic behaviour. It ends (->END) only when it makes sense: a fire-once
-    # self-guard (the 2.8 run-once idiom), or no expressible condition to loop on.
-    for i, ev in enumerate(indep_events):
+    # --- respawn-on-destroy -> //damage/destroy routes (event-driven, no polling) ---
+    for j, ev in enumerate(respawn_events):
+        name = _respawn_name(ev)
+        var, slug = em.symbols[name], _pyname(name)
+        lines.append(f"=== respawn_{j}   # {ev.name}: (re)spawn {name}")
+        for n in ev.commands:
+            lines.append(f"    # {_xml_one(n)}")
+            lines.extend(em.emit_command(n))
+        lines.append(f'    add_role({var}, "respawn_{slug}")')  # tag so the route finds it
+        lines.append("    ->END")
+        lines.append("")
+        lines.append(f'//damage/destroy if has_role(DESTROYED_ID, "respawn_{slug}")')
+        lines.append(f"    task_schedule(respawn_{j})")
+        lines.append("    ->END")
+        lines.append("")
+
+    # --- docked -> //signal/ship_docked (LM docking emits this on station dock) ---
+    for ev in dock_events:
+        lines.append(f"//signal/ship_docked   # {ev.name} (was if_docked)")
+        for n in ev.commands:
+            lines.append(f"    # {_xml_one(n)}")
+            lines.extend(em.emit_command(n))
+        lines.append("    ->END")
+        lines.append("")
+
+    # --- flag waits -> //signal routes fired by set_variable (event-driven) ---
+    for ev in flag_events:
+        c = _flag_signal(ev)
+        name, val = _pyname(c.get("name")), _value(c.get("value", "0"))
+        lines.append(f"//signal/a2x_flag_{name}   # {ev.name} (was if_variable {name})")
+        lines.append(f"    ->END if not ({name} == {val})")  # signal fires on any set; guard value
+        for n in ev.commands:
+            lines.append(f"    # {_xml_one(n)}")
+            lines.extend(em.emit_command(n))
+        lines.append("    ->END")
+        lines.append("")
+
+    # --- remaining independent events -> continuous polling loops (re-fire each tick) ---
+    for i, ev in enumerate(loop_events):
         nm = f"   # {ev.name}" if ev.name != f"event_{i}" else ""
         lines.append(f"=== ind_event_{i}{nm}")
         bools, unhandled = [], []
@@ -177,6 +231,35 @@ def _truthy(v: str) -> bool:
         return float(v) != 0
     except (TypeError, ValueError):
         return bool(v and v.strip())
+
+
+def _respawn_name(ev) -> str | None:
+    """A single ``if_not_exists NAME`` event -> NAME (a respawn-on-destroy candidate)."""
+    if len(ev.conditions) == 1 and ev.conditions[0].tag == "if_not_exists":
+        return ev.conditions[0].get("name")
+    return None
+
+
+def _is_dock(ev) -> bool:
+    """A single ``if_docked`` event -> a //signal/ship_docked route candidate."""
+    return len(ev.conditions) == 1 and ev.conditions[0].tag == "if_docked"
+
+
+def _flag_signal(ev):
+    """A single ``if_variable F == val`` event the engine can push as a signal.
+
+    Returns the condition node, or None. Excludes ``!=``/other comparators (a signal
+    fires on a *set*, so only ``==`` maps cleanly) and events that set the flag they
+    listen on (would self-trigger -- keep those as polling loops).
+    """
+    if len(ev.conditions) != 1 or ev.conditions[0].tag != "if_variable":
+        return None
+    c = ev.conditions[0]
+    if (c.get("comparator", "") or "").strip().upper() not in ("EQUALS", "="):
+        return None
+    if c.get("name") in {x.get("name") for x in ev.commands if x.tag == "set_variable"}:
+        return None
+    return c
 
 
 def _is_fire_once(ev) -> bool:

@@ -165,16 +165,17 @@ class ConvertAddAiTests(unittest.TestCase):
             self.assertIn("ai", f.read())
 
     def test_event_model_hybrid_vs_linear(self):
-        # ADD_AI_SAMPLE's single event is independent (no flag chain).
+        # ADD_AI_SAMPLE's single event waits on a flag (go == 1): in hybrid it becomes
+        # an event-driven //signal route; in linear it is folded into the scene chain.
         dh = convert_file(self.xml, self.out + "h", event_model="hybrid")
         dl = convert_file(self.xml, self.out + "l", event_model="linear")
         sh = open(os.path.join(dh, "story.mast"), encoding="utf-8").read()
         sl = open(os.path.join(dl, "story.mast"), encoding="utf-8").read()
-        # hybrid: scheduled as a concurrent task
-        self.assertIn("task_schedule(ind_event_0)", sh)
-        self.assertIn("=== ind_event_0", sh)
-        # linear: forced into the sequential chain
-        self.assertNotIn("ind_event", sl)
+        # hybrid: a //signal route guarded by the flag value (no polling task)
+        self.assertIn("//signal/a2x_flag_go", sh)
+        self.assertIn("->END if not (go == 1)", sh)
+        # linear: forced into the sequential chain, no route
+        self.assertNotIn("//signal", sl)
         self.assertIn("--- event_0", sl)
 
 
@@ -213,16 +214,18 @@ class ConvertEventLoopTests(unittest.TestCase):
         with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
             return f.read()
 
-    def test_respawn_event_loops_and_refires(self):
-        # if_not_exists -> a live existence check that re-fires the create (respawn),
-        # so the loop body ends by jumping back to its own loop label, not ->END.
+    def test_respawn_event_becomes_destroy_route(self):
+        # if_not_exists Sentry -> an event-driven //damage/destroy route (no polling):
+        # spawn once initially, then respawn whenever the tagged object is destroyed.
         story = self._story()
-        self.assertRegex(story, r"---ind_event_\d+_loop")
-        self.assertIn("not object_exists(obj_sentry)", story)
-        # the respawn body loops back (continuous), and creates inside the loop
-        body = story.split("=== ind_event_")[1]
-        self.assertIn("a2x_create_enemy", body)
-        self.assertRegex(body, r"jump ind_event_\d+_loop\n")
+        self.assertIn("=== respawn_0", story)
+        self.assertIn("task_schedule(respawn_0)", story)               # initial spawn
+        self.assertIn('//damage/destroy if has_role(DESTROYED_ID, "respawn_Sentry")', story)
+        respawn = story.split("=== respawn_0")[1]
+        self.assertIn("a2x_create_enemy", respawn)                     # (re)creates it
+        self.assertIn('add_role(obj_sentry, "respawn_Sentry")', respawn)  # re-tag on spawn
+        # it is NOT a polling loop for the respawn object
+        self.assertNotIn("object_exists(obj_sentry)", story)
 
     def test_fire_once_event_ends(self):
         # a self-guard (if_variable greeted != 1 + set greeted = 1) should ->END, not loop
@@ -238,6 +241,46 @@ class ConvertEventLoopTests(unittest.TestCase):
         story = self._story()
         self.assertIn("default shared greeted = 0", story)  # forward-declared
         self.assertIn("shared greeted = 1", story)          # set as shared
+
+
+FLAG_SIGNAL_SAMPLE = """<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>signal</mission_description>
+  <start>
+    <create type="station" x="50000" y="0" z="50000" name="Base" raceKeys="TSN"/>
+    <set_variable name="alarm" value="1" integer="yes"/>
+  </start>
+  <event name="On Alarm">
+    <if_variable name="alarm" comparator="EQUALS" value="1"/>
+    <destroy name="Base"/>
+  </event>
+</mission_data>
+"""
+
+
+class ConvertFlagSignalTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.xml = os.path.join(self.tmp.name, "MISS_Sig.xml")
+        with open(self.xml, "w", encoding="utf-8") as f:
+            f.write(FLAG_SIGNAL_SAMPLE)
+        self.out = os.path.join(self.tmp.name, "out")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_flag_wait_becomes_signal_route_and_emit(self):
+        d = convert_file(self.xml, self.out)
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # the set_variable that the route listens on also emits the signal (push)
+        self.assertIn("shared alarm = 1", story)
+        self.assertIn('signal_emit("a2x_flag_alarm")', story)
+        # the waiting event is now an event-driven route guarded by the value
+        self.assertIn("//signal/a2x_flag_alarm", story)
+        self.assertIn("->END if not (alarm == 1)", story)
+        # not a polling loop
+        self.assertNotIn("=== ind_event_", story)
 
 
 DIRECT_SAMPLE = """<?xml version="1.0" ?>
