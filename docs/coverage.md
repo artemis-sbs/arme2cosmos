@@ -9,8 +9,10 @@ needs a human decision. Property-level detail for `set_object_property` lives in
 - The full a28 corpus (23 missions) **compiles** under `MastStory`.
 - Converted missions **run headless** with no runtime errors; with `--exercise` a
   mission plays its comms/event chain to game-end.
-- Remaining `# TODO` lines across the corpus: ~2485 (down from ~5384). Most of what
-  remains is either genuinely unmappable 2.8 gameplay or awaiting the decisions below.
+- Remaining `# TODO` lines across the corpus: ~1525 (down from ~5384). ~73% of those are
+  unmapped `set_object_property`/`addto`/`copy` properties (one table -- see
+  [`property_map.md`](property_map.md)); the rest is unmappable 2.8 gameplay or the
+  decisions below.
 
 **Legend:** DONE = real translation · PARTIAL = real for the mapped cases, `# TODO` for
 the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TODO`).
@@ -59,15 +61,45 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `if_distance` | **DONE** | `await distance_less/greater` (object or point) |
 | `if_inside_sphere` / `if_outside_sphere` | **DONE** | `await distance_point_less/greater` (centre flipped) |
 | `if_inside_box` / `if_outside_box` | **DONE** | `a2x_in_box` guard |
-| `if_exists` / `if_not_exists` | **DONE** | `object_exists` guard |
-| `if_fleet_count` (<=0) | **DONE** | `await destroyed_all(role("fleet_N"))` |
-| `if_docked` | **DONE** | `a2x_is_docked` poll |
+| `if_exists` / `if_not_exists` | **DONE** | live `object_exists` (loops) / `//damage/destroy` route (sole `if_not_exists` -> respawn) |
+| `if_fleet_count` (<=0) | **DONE** | `await destroyed_all` (chain) / live `len(role("fleet_N"))` (loops) |
+| `if_docked` | **DONE** | `a2x_is_docked` (loops) / `//signal/ship_docked` route (sole `if_docked`) |
 | `if_timer_finished` | **DONE** | `is_timer_finished` |
-| `if_variable` | **DONE** | python `if` guard |
+| `if_variable` | **DONE** | live boolean guard (loops) / `//signal/a2x_flag_F` route (sole `==`) |
+| `if_difficulty` | **DONE** | live `DIFFICULTY <op> v` boolean (in polling loops) |
 | `if_monster_tag_matches` / `if_object_tag_matches` | **PARTIAL** | inventory guard (tagging gameplay TODO) |
 | `if_comms_button` / `if_gm_button` | **DONE** | handled structurally (become route buttons) |
-| `if_difficulty` / `if_object_property` / `if_scan_level` / `if_in_nebula` / `if_damcon_members` / `if_player_is_targeting` | TODO | emitted as a `# when:` comment |
+| `if_object_property` / `if_scan_level` / `if_in_nebula` / `if_damcon_members` / `if_player_is_targeting` | TODO | emitted as a `# when (verify by hand)` comment |
 | `if_gm_key` / `if_client_key` | TODO | key handlers |
+
+---
+
+## Event model
+
+2.8 events all run continuously -- each re-checks its conditions every tick and fires
+whenever they are true; it never "ends". The converter reproduces that and, where it can,
+turns polling into event-driven routes. Selectable with `--event-model`:
+
+| Mode | Shape |
+|---|---|
+| `linear` | every event folded into one sequential scene chain (simplest to read) |
+| **`hybrid`** (default) | flag-chained scenes stay a linear chain; independent events run concurrently; engine-pushable ones become routes |
+| `a28_compatible` | every event becomes its own continuous polling task (no chain, no routes) -- the worst-case faithful fallback |
+
+**hybrid specifics:**
+- **Classification** -- an event is *sequential* if it is flag-linked to another (waits on
+  a flag an earlier event sets, or feeds a later one); otherwise *independent*.
+- **Independent events re-fire** -- emitted as a polling loop over **live boolean**
+  conditions (`_cond_bool`) that re-evaluates each tick, so respawn / wave / periodic rules
+  work. A loop ends (`->END`) only on a 2.8 fire-once self-guard (`if_variable F != 1` +
+  `set F = 1`) or when it has no expressible condition to loop on.
+- **Poll -> push routes** (single-trigger independent events, no polling):
+  - sole `if_not_exists X` -> spawn once + `//damage/destroy if has_role(DESTROYED_ID, "respawn_X")`.
+  - sole `if_docked` -> `//signal/ship_docked` (LM docking emits this on station dock).
+  - sole `if_variable F == v` -> `//signal/a2x_flag_F`; the matching `set_variable` also `signal_emit`s it.
+  - Multi-condition events stay polling loops **on purpose**: a pure route would miss the
+    "gate flag opens after the object died / undocked" case that a per-tick loop catches.
+- **Flags** are `shared` + forward-declared (`default shared F = 0`) so concurrent tasks/routes read them.
 
 ---
 
@@ -121,8 +153,12 @@ split on it too.
 - **Headings** (`angle`) from `create` are not auto-applied (`a2x_angle()` exists).
 - **Ship art** uses a fuzzy-matched hull crosswalk; unmatched hulls use a placeholder
   (listed per mission in `MIGRATION_NOTES.md`).
-- **Events** are translated as a linear chain; verify the order matches the original
-  flag logic.
+- **Events** default to the `hybrid` model (flag-chained scenes linear, independent events
+  concurrent loops/routes -- see the Event model section); verify the order matches the
+  original flag logic, or fall back to `--event-model a28_compatible` if it misbehaves.
+- **Conditions** that have no live-boolean form (tag-match, scan level, in-nebula, object
+  property) become a `# when (verify by hand)` comment, so that event may fire without
+  re-checking them.
 - **Comms/GM buttons** become routes; the selection/gating may need refining per mission.
 - Generated missions depend on the `a2x` layer in `sbs_utils` (v1.4.0_dev+) + the
   feature-detected LegendaryMissions addons.
