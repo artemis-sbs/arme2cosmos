@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import re
 
-from .emit import Emitter, emit_condition, _mast_str, _pyname, var_cond_bool
+from .emit import Emitter, emit_condition, _mast_str, _pyname, _cond_bool
 from .model import Mission
 from .parser import parse_file
 
@@ -109,25 +109,32 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
 
     lines.append("    ->END")  # end the map task before the independent task labels
 
+    # Independent events are continuous: a 2.8 event polls its conditions every tick
+    # and FIRES whenever they're true (it never "ends"). So each becomes a polling loop
+    # that re-evaluates live boolean conditions and re-fires -- giving respawn / wave /
+    # periodic behaviour. It ends (->END) only when it makes sense: a fire-once
+    # self-guard (the 2.8 run-once idiom), or no expressible condition to loop on.
     for i, ev in enumerate(indep_events):
         nm = f"   # {ev.name}" if ev.name != f"event_{i}" else ""
         lines.append(f"=== ind_event_{i}{nm}")
-        # if_variable conditions are real flag guards: a concurrent task must WAIT for
-        # them (unlike the linear chain, where ordering approximates it).
-        flag_conds = [c for c in ev.conditions if c.tag == "if_variable"]
-        other_conds = [c for c in ev.conditions if c.tag != "if_variable"]
-        if flag_conds:
-            wl = f"ind_event_{i}_guard"
-            lines.append(f"---{wl}")
-            lines.append("    await delay_sim(0.5)")
-            cond = " and ".join(var_cond_bool(c) for c in flag_conds)
-            lines.append(f"    jump {wl} if not ({cond})")
-        for c in other_conds:
-            lines.extend(emit_condition(em, c, 1000 + i))  # distinct wait-label scope
+        bools, unhandled = [], []
+        for c in ev.conditions:
+            b = _cond_bool(em, c)
+            (bools.append(b) if b else unhandled.append(c))
+        for c in unhandled:
+            lines.append(f"    # when (verify by hand): {_xml_one(c)}")
+        loop = f"ind_event_{i}_loop"
+        lines.append(f"---{loop}")
+        lines.append("    await delay_sim(0.5)")
+        if bools:
+            lines.append(f"    jump {loop} if not ({' and '.join(bools)})")
         for n in ev.commands:
             lines.append(f"    # {_xml_one(n)}")
             lines.extend(em.emit_command(n))
-        lines.append("    ->END")
+        if bools and not _is_fire_once(ev):
+            lines.append(f"    jump {loop}")  # 2.8 event re-fires while conditions hold
+        else:
+            lines.append("    ->END")  # fire-once self-guard (or nothing to loop on)
         lines.append("")
 
     lines.extend(build_button_route(
@@ -170,6 +177,18 @@ def _truthy(v: str) -> bool:
         return float(v) != 0
     except (TypeError, ValueError):
         return bool(v and v.strip())
+
+
+def _is_fire_once(ev) -> bool:
+    """True if the event self-guards against re-firing: an ``if_variable`` NOT/!= test
+    on a flag the event itself sets (2.8's run-once idiom). Such an event makes sense to
+    ``->END`` after firing; others loop continuously like a real 2.8 event.
+    """
+    sets = {c.get("name") for c in ev.commands if c.tag == "set_variable"}
+    return any(c.tag == "if_variable"
+               and (c.get("comparator", "") or "").strip().upper() in ("NOT", "!=")
+               and c.get("name") in sets
+               for c in ev.conditions)
 
 
 def _event_flags(ev):

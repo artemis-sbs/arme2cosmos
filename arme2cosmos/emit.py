@@ -629,3 +629,55 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0) -> list[str]:
     if tag == "if_timer_finished":
         return [f'    await is_timer_finished(0, "{n.get("name")}")']
     return [f"    # when: {_xml_repr(n)}"]
+
+
+def _cond_bool(em: Emitter, n: XmlNode) -> str | None:
+    """A condition as a live Python boolean (for a per-tick polling loop), or None if
+    it can't be expressed -- the caller then leaves a 'verify by hand' comment.
+
+    Unlike :func:`emit_condition` (which emits one-shot ``await`` waits suited to a
+    sequential scene), these re-evaluate every loop pass, so a continuous 2.8 event can
+    re-fire (respawn / wave / periodic) the way it does in the old engine.
+    """
+    tag = n.tag
+    if tag == "if_variable":
+        return var_cond_bool(n)
+    if tag in ("if_exists", "if_not_exists"):
+        o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
+        return f"object_exists({o})" if tag == "if_exists" else f"not object_exists({o})"
+    if tag == "if_timer_finished":
+        return f'is_timer_finished(0, "{n.get("name")}")'
+    if tag == "if_docked":
+        em.addons.add("docking")
+        ship = em.player_var or 'role("__player__")'
+        return f"a2x_is_docked({ship})"
+    if tag == "if_difficulty":
+        op = _CMP_OP.get((n.get("comparator", "") or "").strip().upper(), "==")
+        return f"DIFFICULTY {op} {_value(n.get('value', '0'))}"
+    if tag == "if_fleet_count":
+        fl = n.get("fleetnumber")
+        if not fl:
+            return None
+        op = _CMP_OP.get((n.get("comparator", "") or "").strip().upper(), "==")
+        return f'len(to_object_list(role("fleet_{fl}"))) {op} {_value(n.get("value", "0"))}'
+    if tag == "if_distance":
+        a = _resolve_obj(em, n.get("name1"), n.get("player_slot1"))
+        val = _value(n.get("value", "0"))
+        less = _is_less(n.get("comparator"))
+        if n.get("name2") or n.get("player_slot2"):
+            b = _resolve_obj(em, n.get("name2"), n.get("player_slot2"))
+            return f"sbs.distance_id({a}, {b}) {'<' if less else '>'} {val}"
+        px, py, pz = n.get("pointX", "0"), n.get("pointY", "0"), n.get("pointZ", "0")
+        w = f"a2x_within({a}, {px}, {py}, {pz}, {val})"
+        return w if less else f"not {w}"
+    if tag in ("if_inside_sphere", "if_outside_sphere"):
+        o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
+        cx, cy, cz = n.get("centerX", "0"), n.get("centerY", "0"), n.get("centerZ", "0")
+        w = f"a2x_within({o}, {cx}, {cy}, {cz}, {_value(n.get('radius', '0'))})"
+        return w if tag == "if_inside_sphere" else f"not {w}"
+    if tag in ("if_inside_box", "if_outside_box"):
+        o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
+        inside = "True" if tag == "if_inside_box" else "False"
+        return (f'a2x_in_box({o}, {n.get("leastX","0")}, {n.get("leastZ","0")}, '
+                f'{n.get("mostX","0")}, {n.get("mostZ","0")}, inside={inside})')
+    return None

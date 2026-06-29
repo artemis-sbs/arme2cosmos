@@ -178,6 +178,68 @@ class ConvertAddAiTests(unittest.TestCase):
         self.assertIn("--- event_0", sl)
 
 
+RESPAWN_SAMPLE = """<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>respawn</mission_description>
+  <start>
+    <create type="station" x="50000" y="0" z="50000" name="Base" raceKeys="TSN"/>
+  </start>
+  <event name="Respawn Sentry">
+    <if_not_exists name="Sentry"/>
+    <create type="enemy" x="60000" y="0" z="60000" name="Sentry" raceKeys="Kralien"/>
+  </event>
+  <event name="One Shot Greeting">
+    <if_variable name="greeted" comparator="!=" value="1"/>
+    <if_distance name1="Base" player_slot1="1" comparator="LESS" value="5000"/>
+    <set_variable name="greeted" value="1" integer="yes"/>
+  </event>
+</mission_data>
+"""
+
+
+class ConvertEventLoopTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.xml = os.path.join(self.tmp.name, "MISS_Re.xml")
+        with open(self.xml, "w", encoding="utf-8") as f:
+            f.write(RESPAWN_SAMPLE)
+        self.out = os.path.join(self.tmp.name, "out")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _story(self):
+        d = convert_file(self.xml, self.out)
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_respawn_event_loops_and_refires(self):
+        # if_not_exists -> a live existence check that re-fires the create (respawn),
+        # so the loop body ends by jumping back to its own loop label, not ->END.
+        story = self._story()
+        self.assertRegex(story, r"---ind_event_\d+_loop")
+        self.assertIn("not object_exists(obj_sentry)", story)
+        # the respawn body loops back (continuous), and creates inside the loop
+        body = story.split("=== ind_event_")[1]
+        self.assertIn("a2x_create_enemy", body)
+        self.assertRegex(body, r"jump ind_event_\d+_loop\n")
+
+    def test_fire_once_event_ends(self):
+        # a self-guard (if_variable greeted != 1 + set greeted = 1) should ->END, not loop
+        story = self._story()
+        # find the ind_event whose guard mentions greeted
+        chunks = story.split("=== ind_event_")
+        greet = next(c for c in chunks if "greeted != 1" in c)
+        self.assertIn("shared greeted = 1", greet)
+        self.assertIn("->END", greet)
+        self.assertNotRegex(greet.split("->END")[0], r"jump ind_event_\d+_loop\n")
+
+    def test_flags_are_shared_and_declared(self):
+        story = self._story()
+        self.assertIn("default shared greeted = 0", story)  # forward-declared
+        self.assertIn("shared greeted = 1", story)          # set as shared
+
+
 DIRECT_SAMPLE = """<?xml version="1.0" ?>
 <mission_data version="2.8">
   <mission_description>directing</mission_description>
