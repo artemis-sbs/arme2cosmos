@@ -153,6 +153,10 @@ XML next to it) and listed in `MIGRATION_NOTES.md`, for example:
 Treat the output as a strong first draft: the structure, spawns, positions, and story
 flow are in place; you polish the details the notes call out.
 
+For the full command-by-command coverage (what's finished vs. what needs a human
+decision), see [`docs/coverage.md`](docs/coverage.md); property mappings are detailed in
+[`docs/property_map.md`](docs/property_map.md).
+
 ---
 
 ## Running the converted mission
