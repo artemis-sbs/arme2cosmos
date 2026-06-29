@@ -164,6 +164,19 @@ class ConvertAddAiTests(unittest.TestCase):
         with open(os.path.join(d, "story.json"), encoding="utf-8") as f:
             self.assertIn("ai", f.read())
 
+    def test_event_model_hybrid_vs_linear(self):
+        # ADD_AI_SAMPLE's single event is independent (no flag chain).
+        dh = convert_file(self.xml, self.out + "h", event_model="hybrid")
+        dl = convert_file(self.xml, self.out + "l", event_model="linear")
+        sh = open(os.path.join(dh, "story.mast"), encoding="utf-8").read()
+        sl = open(os.path.join(dl, "story.mast"), encoding="utf-8").read()
+        # hybrid: scheduled as a concurrent task
+        self.assertIn("task_schedule(ind_event_0)", sh)
+        self.assertIn("=== ind_event_0", sh)
+        # linear: forced into the sequential chain
+        self.assertNotIn("ind_event", sl)
+        self.assertIn("--- event_0", sl)
+
 
 DIRECT_SAMPLE = """<?xml version="1.0" ?>
 <mission_data version="2.8">

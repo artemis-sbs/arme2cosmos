@@ -32,7 +32,7 @@ def _display_name(mission: Mission) -> str:
     return re.sub(r"^MISS_", "", mission.name).replace("_", " ")
 
 
-def build_story_mast(mission: Mission, em: Emitter) -> str:
+def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid") -> str:
     _prescan_named_objects(mission, em)
     label = _slug(mission.name)
     disp = _display_name(mission)
@@ -76,10 +76,13 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
         else:
             plain_events.append(ev)
 
-    # Split flag-chained (sequential scene) events from independent ones. 2.8 events
-    # are all concurrent; the chain is kept linear for readability, the independent
-    # ones run as concurrent tasks (matching the flat 2.8 semantics).
-    seq_events, indep_events = _classify_events(plain_events)
+    # Event model: 'linear' = one sequential scene chain (readable, less faithful);
+    # 'hybrid' (default) = keep flag-chained scenes linear, run independent events as
+    # concurrent tasks (matching 2.8's flat-event semantics).
+    if event_model == "linear":
+        seq_events, indep_events = plain_events, []
+    else:
+        seq_events, indep_events = _classify_events(plain_events)
 
     if indep_events:
         lines.append("    # independent events -> concurrent tasks (2.8 flat-event model)")
@@ -352,12 +355,12 @@ def build_notes(mission: Mission, em: Emitter) -> str:
 
 
 def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSION,
-                 hullmap: dict | None = None) -> str:
+                 hullmap: dict | None = None, event_model: str = "hybrid") -> str:
     """Convert one mission XML; write a scaffold dir under out_root. Returns the dir."""
     mission = parse_file(path)
     em = Emitter(mission, hullmap=hullmap)
 
-    story = build_story_mast(mission, em)  # run first so em.addons/notes are populated
+    story = build_story_mast(mission, em, event_model)  # populates em.addons/notes
     files = {
         "story.mast": story,
         "script.py": build_script_py(mission),

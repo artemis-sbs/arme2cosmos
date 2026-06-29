@@ -122,6 +122,12 @@ Options:
 - `--lib-version` — the library version tag written into `story.json`
   (default `v1.4.0_dev`; set it to match the libraries installed with your Cosmos).
 - `--hullmap` — a `hullmap.json` from `artmap`, for real ship art.
+- `--event-model` — how 2.8 events are generated:
+  - `hybrid` (default) — flag-chained "scene" events stay one readable sequence;
+    events with independent triggers (a timer/distance/dock not gated by the chain)
+    run as concurrent tasks, matching how 2.8 checks all events every tick.
+  - `linear` — force every event into a single sequential chain (simpler to read /
+    hand-edit; use for missions you know are strictly sequential).
 
 ### What it translates for you
 

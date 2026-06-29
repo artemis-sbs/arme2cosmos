@@ -59,7 +59,7 @@ def _cmd_convert(args: argparse.Namespace) -> int:
             hullmap = json.load(hf)
     for f in files:
         try:
-            out = convert_file(f, args.out, args.lib_version, hullmap)
+            out = convert_file(f, args.out, args.lib_version, hullmap, args.event_model)
         except Exception as exc:  # noqa: BLE001
             print(f"!! failed to convert {f}: {exc}", file=sys.stderr)
             continue
@@ -112,6 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
                       help="sbslib/mastlib version tag for story.json (default: v1.4.0_dev)")
     conv.add_argument("--hullmap", default=None,
                       help="hullmap.json (from `artmap`) to resolve real ship art")
+    conv.add_argument("--event-model", choices=["hybrid", "linear"], default="hybrid",
+                      help="hybrid (default): flag-chained scenes stay linear, "
+                           "independent events run as concurrent tasks; "
+                           "linear: one sequential scene chain")
     conv.set_defaults(func=_cmd_convert)
 
     art = sub.add_parser("artmap", help="draft the vesselData<->shipDataBB hull crosswalk")
