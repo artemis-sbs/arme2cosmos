@@ -92,7 +92,7 @@ _COMMANDS = {
     "set_player_carried_type": Coverage(MANUAL, "carried single-seat config"),
     "set_player_station_carried": Coverage(MANUAL, "station-stored fighters"),
     "clear_player_station_carried": Coverage(MANUAL, "station-stored fighters"),
-    "spawn_external_program": Coverage(MANUAL, "launches an external program; no Cosmos equivalent - drop/stub"),
+    "spawn_external_program": Coverage(FULL, "a2x_spawn_external_program (subprocess; update the path)"),
     "gm_instructions": Coverage(MANUAL, "GM briefing text; surface in GM console or notes"),
 }
 

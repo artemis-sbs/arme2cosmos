@@ -432,6 +432,12 @@ class Emitter:
     def c_log(self, n: XmlNode) -> list[str]:
         return [f'    log("{_mast_str(n.get("text", ""))}")']
 
+    def c_spawn_external(self, n: XmlNode) -> list[str]:
+        self.note(f"spawn_external_program '{n.get('name','?')}': launches an external "
+                  f"program (2.8 used it for cutscene videos); update the path for Cosmos")
+        return [f'    a2x_spawn_external_program("{_mast_str(n.get("name", ""))}", '
+                f'"{_mast_str(n.get("arguments", ""))}")']
+
     def c_play_sound(self, n: XmlNode) -> list[str]:
         fn = _mast_str(n.get("filename", ""))
         return [f'    sbs.play_audio_file(0, get_mission_audio_file("{fn}"), 1.0, 1.0)']
@@ -526,6 +532,7 @@ _COMMAND_EMIT = {
     "set_named_object_tag_state": Emitter.c_set_named_object_tag_state,
     "warning_popup_message": Emitter.c_warning_popup,
     "log": Emitter.c_log,
+    "spawn_external_program": Emitter.c_spawn_external,
     "play_sound_now": Emitter.c_play_sound,
     "set_player_grid_damage": Emitter.c_grid_damage,
     "set_special": Emitter.c_set_special,
