@@ -115,14 +115,19 @@ smaller set (`eng_control_type_index` is 0-3). The 8->4 index mapping needs you.
 
 ## Global settings (2.8 set these with no object -- game-wide)
 
+"nonPlayer" = all NPC ships, so the difficulty knobs map to per-ship coefficients
+applied across the fleet (`coeff = value/100`) via `a2x_set_fleet_coeff`. Applied to
+ships that exist at the call; 2.8 also affected future spawns -- re-apply after later
+spawns if needed.
+
 | 2.8 property | Target | Cosmos | Status | Notes |
 |---|---|---|---|---|
+| `nonPlayerSpeed` (25) | data_set | `speed_coeff` on all NPCs | **DONE** | value/100 |
+| `nonPlayerShield` (25) | data_set | `all_shield_upgrade_coeff` on all NPCs | **DONE** | |
+| `nonPlayerWeapon` (25) | data_set | `all_beam_upgrade_coeff` + `all_tube_upgrade_coeff` on all NPCs | **DONE** | |
+| `playerShields` (25) | data_set | `all_shield_upgrade_coeff` on all players | **DONE** | |
+| `playerWeapon` (25) | data_set | `all_beam_upgrade_coeff` on all players | **DONE** | |
 | `musicObjectMasterVolume` (299) | setting | Cosmos music-volume API | VERIFY | which call? |
-| `nonPlayerSpeed` (25) | setting | difficulty coeff | HUMAN | |
-| `nonPlayerShield` (25) | setting | difficulty coeff | HUMAN | |
-| `nonPlayerWeapon` (25) | setting | difficulty coeff | HUMAN | |
-| `playerWeapon` (25) | setting | difficulty coeff | HUMAN | |
-| `playerShields` (25) | setting | difficulty coeff | HUMAN | |
 | `nebulaIsOpaque` (30) | setting | global nebula setting | HUMAN | |
 | `sensorSetting` (38) | setting | global sensor setting | HUMAN | |
 
