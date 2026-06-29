@@ -54,6 +54,32 @@ class ConvertTests(unittest.TestCase):
                       "description.yaml", "MIGRATION_NOTES.md"):
             self.assertTrue(os.path.isfile(os.path.join(d, fname)), fname)
 
+    def test_description_yaml_has_all_expected_keys(self):
+        # every Cosmos description.yaml is expected to carry these six keys.
+        d, _, _ = self._convert()
+        with open(os.path.join(d, "description.yaml"), encoding="utf-8") as f:
+            text = f.read()
+        keys = {ln.split(":", 1)[0].strip() for ln in text.splitlines() if ":" in ln}
+        for expected in ("format version", "Category", "Category Priority",
+                         "Visible Mission Name", "Description", "Keywords"):
+            self.assertIn(expected, keys, expected)
+
+    def test_description_yaml_with_colon_is_valid(self):
+        # a 2.8 description containing ": " (e.g. "one thing: TROUBLE!") must not break YAML
+        from arme2cosmos.convert import build_description_yaml
+        from arme2cosmos.model import Mission
+        m = Mission(name="MISS_X", source_path="x.xml")
+        m.description = 'Uncover one thing: TROUBLE! The "best" crew wins.'
+        text = build_description_yaml(m)
+        # parse with the same yaml the engine uses
+        try:
+            from sbs_utils import yaml
+        except ImportError:
+            self.skipTest("sbs_utils.yaml not importable in this environment")
+        data = yaml.safe_load(text)
+        self.assertIn("TROUBLE", data["Description"])
+        self.assertEqual(data["Keywords"], "2.8 port")
+
     def test_create_family_translated(self):
         _, story, _ = self._convert()
         self.assertIn('a2x_create_station(70000, 0, 25000', story)
