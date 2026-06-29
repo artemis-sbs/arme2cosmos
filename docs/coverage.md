@@ -39,7 +39,8 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `set_ship_text` | **DONE** | name/race/class/desc -> `name_tag`/`hull_origin`/`hull_name`/`long_description` (scan_desc/hail dropped) |
 | `set_relative_position` | **DONE** | `a2x_set_relative_position` (XZ; heading-relative nuance is a refinement) |
 | `set_side_value` | **DONE** | `a2x_set_side_value` (swaps the side role) |
-| `set_special` | **PARTIAL** | 5 elite abilities -> `elite_*` flags; combat abilities + ship/captain types are NO-EQUIV |
+| `set_special` (ability) | **DONE** | all 14 abilities -> LM elite system (engine flags + scripted `elite/*` roles via `handle_elite_abilities`); no-name calls target `COMMS_SELECTED_ID` |
+| `set_special` (ship/captain) | NO-EQUIV | the 2.8 special ship/captain *types* have no Cosmos equivalent |
 | `set_comms_button` (+ `if_comms_button`) | **DONE** | a `//comms` route with `+ "label":` buttons |
 | `set_gm_button` (+ `if_gm_button`) | **DONE** | a gamemaster-gated `//comms/gm/...` **tree** (slash = submenu) |
 | `set_monster_tag_data` / `set_named_object_tag_state` | **PARTIAL** | stored as inventory values; the tagging *gameplay* needs a tag-torpedo + `//damage` route (note emitted) |
@@ -86,10 +87,10 @@ See [`property_map.md`](property_map.md). The high-value open ones:
   `pirateRepWithStations`, plasma-shock/ECM/tag/probe/beacon stores, `nebulaIsOpaque`,
   `sensorSetting`, monster `age`.
 
-### 2. `set_special` combat abilities (NO-EQUIV, ~864 occurrences)
-`Cloak`, `HET`, `Warp`, `Teleport`, `Tractor`, `ShldDrain`, `ShldVamp` and the special
-**ship/captain** types have no Cosmos `elite_*` equivalent. Decide per ability: **drop**,
-or **author a Cosmos behaviour** to stand in for it. This is the single largest bucket.
+### 2. `set_special` combat abilities -- RESOLVED
+All 14 elite abilities now map to the LegendaryMissions elite system (the 9 combat
+abilities are scripted in the `fleets` addon, not engine flags). Only the special
+**ship/captain** *types* remain NO-EQUIV (decide: drop, or author a stand-in).
 
 ### 3. Tagging gameplay
 `set_*_tag_data` / tag-match conditions store data as inventory, but 2.8's tagging is a
