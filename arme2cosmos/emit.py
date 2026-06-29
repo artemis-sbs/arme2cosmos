@@ -212,8 +212,8 @@ class Emitter:
         return [f"    {fn}({count}, {start}{end}{radius}{rng}{seed}{nt})"]
 
     def c_set_variable(self, n: XmlNode) -> list[str]:
-        name = n.get("name")
-        return [f"    {_pyname(name)} = {_value(n.get('value', '0'))}"]
+        # shared so concurrent independent-event tasks can read the flag
+        return [f"    shared {_pyname(n.get('name'))} = {_value(n.get('value', '0'))}"]
 
     def c_set_timer(self, n: XmlNode) -> list[str]:
         return [f'    set_timer(0, "{n.get("name")}", seconds={n.get("seconds", "0")})']
@@ -475,6 +475,18 @@ def _mast_str(s: str) -> str:
     s = (s or "").replace("\\", "\\\\").replace('"', '\\"')
     s = s.replace("\r", " ").replace("\n", " ").strip()
     return s
+
+
+# 2.8 comparator -> Python operator.
+_CMP_OP = {"=": "==", "EQUALS": "==", "!=": "!=", "NOT": "!=",
+           "<": "<", "LESS": "<", ">": ">", "GREATER": ">",
+           "<=": "<=", "LESS_EQUAL": "<=", ">=": ">=", "GREATER_EQUAL": ">="}
+
+
+def var_cond_bool(n: XmlNode) -> str:
+    """An if_variable condition -> a Python boolean expression (e.g. ``spawn2 == 1``)."""
+    op = _CMP_OP.get((n.get("comparator", "") or "").strip().upper(), "==")
+    return f"{_pyname(n.get('name'))} {op} {_value(n.get('value', '0'))}"
 
 
 def _value(v: str) -> str:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import re
 
-from .emit import Emitter, emit_condition, _mast_str
+from .emit import Emitter, emit_condition, _mast_str, _pyname, var_cond_bool
 from .model import Mission
 from .parser import parse_file
 
@@ -54,6 +54,14 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
         lines.append("    # objects forward-declared (shared so concurrent event tasks see them)")
         for v in obj_vars:
             lines.append(f"    shared {v} = None")
+    # flags forward-declared (shared) so independent-event tasks can poll/guard on them
+    flag_vars = sorted({_pyname(n.get("name")) for n in mission.all_nodes()
+                        if n.tag in ("set_variable", "if_variable") and n.get("name")})
+    flag_vars = [f for f in flag_vars if f not in obj_vars]
+    if flag_vars:
+        lines.append("    # event flags forward-declared (shared, default 0)")
+        for v in flag_vars:
+            lines.append(f"    default shared {v} = 0")
     lines.append("")
     lines.append("    # --- start block ---")
     for n in mission.start:
@@ -104,7 +112,17 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     for i, ev in enumerate(indep_events):
         nm = f"   # {ev.name}" if ev.name != f"event_{i}" else ""
         lines.append(f"=== ind_event_{i}{nm}")
-        for c in ev.conditions:
+        # if_variable conditions are real flag guards: a concurrent task must WAIT for
+        # them (unlike the linear chain, where ordering approximates it).
+        flag_conds = [c for c in ev.conditions if c.tag == "if_variable"]
+        other_conds = [c for c in ev.conditions if c.tag != "if_variable"]
+        if flag_conds:
+            wl = f"ind_event_{i}_guard"
+            lines.append(f"---{wl}")
+            lines.append("    await delay_sim(0.5)")
+            cond = " and ".join(var_cond_bool(c) for c in flag_conds)
+            lines.append(f"    jump {wl} if not ({cond})")
+        for c in other_conds:
             lines.extend(emit_condition(em, c, 1000 + i))  # distinct wait-label scope
         for n in ev.commands:
             lines.append(f"    # {_xml_one(n)}")
