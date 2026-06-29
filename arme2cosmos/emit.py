@@ -25,8 +25,10 @@ _AI_MAPPED = {"CHASE_PLAYER", "CHASE_STATION", "CHASE_AI_SHIP", "CHASE_NEUTRAL",
 # 2.8 set_object_property names with a confirmed Cosmos mapping (mirror of a2x.props).
 # These emit a real a2x_set_object_property call; the rest stay # TODO. See
 # docs/property_map.md for the full table and the VERIFY/HUMAN rows.
-# 2.8 set_special abilities with a Cosmos elite_* flag (mirror of a2x.props).
-_ELITE_ABILITIES = {"Stealth", "LowVis", "Drones", "AntiMine", "AntiTorp"}
+# 2.8 set_special abilities that map to a Cosmos LM elite ability (mirror of a2x.props).
+_ELITE_ABILITIES = {"Stealth", "LowVis", "Drones", "AntiMine", "AntiTorp",
+                    "Cloak", "HET", "Warp", "Teleport", "TeleBack", "Tractor",
+                    "ShldDrain", "ShldVamp", "ShldReset"}
 
 # 2.8 global difficulty props (no object) -> fleet coefficients (mirror of a2x.props).
 _FLEET_COEFF = {"nonPlayerSpeed", "nonPlayerShield", "nonPlayerWeapon",
@@ -407,15 +409,20 @@ class Emitter:
         return [f'    a2x_set_ship_text({var}, {", ".join(args)})']
 
     def c_set_special(self, n: XmlNode) -> list[str]:
-        var = self.symbols.get(n.get("name"))
+        # the ship: a captured named object, a player_slot, or (GM-button handlers
+        # with no name) the comms-selected ship.
+        obj = self.symbols.get(n.get("name"))
+        if obj is None and n.get("name") is None:
+            obj = "COMMS_SELECTED_ID"
         ability = n.get("ability")
         on = "False" if n.get("clear") is not None else "True"
         out = []
-        if ability and var is not None and ability in _ELITE_ABILITIES:
-            out.append(f'    a2x_set_special({var}, "{ability}", on={on})')
+        if ability and obj is not None and ability in _ELITE_ABILITIES:
+            self.addons.add("fleets")  # handle_elite_abilities lives in the fleets addon
+            out.append(f'    a2x_set_special({obj}, "{ability}", on={on})')
         elif ability:
-            self.note(f"set_special ability '{ability}': no Cosmos elite_* flag "
-                      f"(combat ability) -- wire by hand")
+            self.note(f"set_special ability '{ability}': object not resolvable / "
+                      f"unmapped ability -- wire by hand")
             out.append(f"    # TODO set_special ability={ability} on={on}: {_xml_repr(n)}")
         if n.get("ship") is not None or n.get("captain") is not None:
             self.note("set_special ship/captain type has no Cosmos equivalent")
