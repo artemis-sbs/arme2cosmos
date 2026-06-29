@@ -256,6 +256,19 @@ class ConvertCommsButtonTests(unittest.TestCase):
         self.assertNotIn("--- event_1", story)  # only one chain event remains
         self.assertIn("--- event_0", story)
 
+    def test_quick_wins_log_sound_griddamage(self):
+        from arme2cosmos.emit import Emitter
+        from arme2cosmos.model import XmlNode
+        em = Emitter.__new__(Emitter)
+        em.notes, em.addons, em.symbols, em.player_var, em.hullmap = [], set(), {}, "player_ship", None
+        self.assertEqual(em.c_log(XmlNode("log", {"text": 'hi "there"'}))[0],
+                         '    log("hi \\"there\\"")')
+        self.assertEqual(em.c_play_sound(XmlNode("play_sound_now", {"filename": "boom.wav"}))[0],
+                         '    sbs.play_audio_file(0, get_mission_audio_file("boom.wav"), 1.0, 1.0)')
+        self.assertEqual(em.c_grid_damage(XmlNode("set_player_grid_damage",
+                         {"player_slot": "0", "systemType": "systemImpulse"}))[0],
+                         "    grid_damage_system(player_ship, sbs.SHPSYS.ENGINES)")
+
     def test_set_object_property_mapped_vs_todo(self):
         from arme2cosmos.emit import Emitter
         from arme2cosmos.model import XmlNode

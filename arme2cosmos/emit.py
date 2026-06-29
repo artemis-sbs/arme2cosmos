@@ -36,6 +36,13 @@ _AUTO_PROPS = {
 # Tiny starter hull/art crosswalk. The real table is the tool's `artmap`
 # (vesselData.xml <-> shipDataBB.json); these are sensible placeholders so output
 # runs, each flagged in MIGRATION_NOTES.
+# 2.8 set_player_grid_damage systemType -> Cosmos sbs.SHPSYS (4 systems).
+_GRID_SYS = {
+    "systemBeam": "WEAPONS", "systemTorpedo": "WEAPONS", "systemTactical": "WEAPONS",
+    "systemTurning": "ENGINES", "systemImpulse": "ENGINES", "systemWarp": "ENGINES",
+    "systemFrontShield": "SHIELDS", "systemBackShield": "SHIELDS",
+}
+
 _STATION_ART = "starbase_command"
 _ENEMY_ART = "kralien_cruiser"
 _NEUTRAL_ART = "transport"
@@ -328,6 +335,21 @@ class Emitter:
     def c_clear_gm_button(self, n: XmlNode) -> list[str]:
         return [f'    # clear_gm_button "{n.get("text","")}"']
 
+    def c_log(self, n: XmlNode) -> list[str]:
+        return [f'    log("{_mast_str(n.get("text", ""))}")']
+
+    def c_play_sound(self, n: XmlNode) -> list[str]:
+        fn = _mast_str(n.get("filename", ""))
+        return [f'    sbs.play_audio_file(0, get_mission_audio_file("{fn}"), 1.0, 1.0)']
+
+    def c_grid_damage(self, n: XmlNode) -> list[str]:
+        ship = self.symbols.get(n.get("name")) or self.player_var or 'role("__player__")'
+        sysn = _GRID_SYS.get(n.get("systemType"))
+        if sysn is None:
+            return [f"    # TODO set_player_grid_damage systemType="
+                    f"{n.get('systemType')}: {_xml_repr(n)}"]
+        return [f"    grid_damage_system({ship}, sbs.SHPSYS.{sysn})"]
+
     def c_incoming_message(self, n: XmlNode) -> list[str]:
         frm = _mast_str(n.get("from", ""))
         fn = _mast_str(n.get("fileName", ""))
@@ -404,6 +426,9 @@ _COMMAND_EMIT = {
     "set_monster_tag_data": Emitter.c_set_monster_tag_data,
     "set_named_object_tag_state": Emitter.c_set_named_object_tag_state,
     "warning_popup_message": Emitter.c_warning_popup,
+    "log": Emitter.c_log,
+    "play_sound_now": Emitter.c_play_sound,
+    "set_player_grid_damage": Emitter.c_grid_damage,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
     "incoming_message": Emitter.c_incoming_message,
