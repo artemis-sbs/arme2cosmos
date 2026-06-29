@@ -108,8 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
     conv = sub.add_parser("convert", help="scaffold a Cosmos MAST mission from 2.8 XML")
     conv.add_argument("path", help="a mission .xml, a MISS_ folder, or a parent dir")
     conv.add_argument("--out", default="out", help="output root directory (default: out/)")
-    conv.add_argument("--lib-version", default="v1.4.0_dev",
-                      help="sbslib/mastlib version tag for story.json (default: v1.4.0_dev)")
+    conv.add_argument("--lib-version", default="v1.4.0",
+                      help="sbslib/mastlib version tag for story.json (default: v1.4.0)")
     conv.add_argument("--hullmap", default=None,
                       help="hullmap.json (from `artmap`) to resolve real ship art")
     conv.add_argument("--event-model", choices=["hybrid", "linear", "a28_compatible"],

@@ -19,7 +19,7 @@ from .parser import parse_file
 _BASELINE_ADDONS = ["consoles", "docking", "comms", "damage", "prefabs", "fleets"]
 # Library version tag the generated story.json references. Matches the libs shipped
 # in the missions __lib__ folder; override with `convert --lib-version`.
-DEFAULT_LIB_VERSION = "v1.4.0_dev"
+DEFAULT_LIB_VERSION = "v1.4.0"
 
 
 def _slug(name: str) -> str:
@@ -458,14 +458,29 @@ def build_story_json(em: Emitter, lib_version: str = DEFAULT_LIB_VERSION) -> str
             '}\n')
 
 
+def _yaml_scalar(s: str) -> str:
+    """A YAML-safe scalar: plain when it can't confuse the parser, else a double-quoted
+    scalar (so a colon/quote/`#` in a 2.8 description -- e.g. "one thing: TROUBLE!" --
+    doesn't break parsing). Double quotes keep apostrophes literal (no `''` doubling)."""
+    s = s.replace("\n", " ").strip()
+    if s and not re.search(r"""[:#"'\[\]{}|>&*!%@`,]""", s) and s[0] not in "-?":
+        return s
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def build_description_yaml(mission: Mission) -> str:
+    # The six keys every Cosmos description.yaml is expected to carry (matches the
+    # production missions: format version, Category, Category Priority, Visible Mission
+    # Name, Description, Keywords).
     disp = _display_name(mission)
     desc = mission.description.replace("^", " ").replace("\n", " ").strip()
+    # 2.8 has no keyword/category metadata; tag the port so it is findable in the list.
     return (f"format version: 1\n"
             f"Category: Standard\n"
             f"Category Priority: C\n"
-            f"Visible Mission Name: {disp}\n"
-            f"Description: {desc}\n")
+            f"Visible Mission Name: {_yaml_scalar(disp)}\n"
+            f"Description: {_yaml_scalar(desc)}\n"
+            f"Keywords: 2.8 port\n")
 
 
 def build_notes(mission: Mission, em: Emitter) -> str:

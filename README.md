@@ -102,7 +102,7 @@ will use a placeholder you can swap later.
 ## `convert` — scaffold a mission
 
 ```sh
-arme2cosmos convert <path> [--out out] [--lib-version v1.4.0_dev] [--hullmap hullmap.json]
+arme2cosmos convert <path> [--out out] [--lib-version v1.4.0] [--hullmap hullmap.json]
 ```
 
 Creates a ready-to-open Cosmos mission folder:
@@ -120,7 +120,7 @@ out/<name>/
 Options:
 - `--out` — where to write (default `out/`).
 - `--lib-version` — the library version tag written into `story.json`
-  (default `v1.4.0_dev`; set it to match the libraries installed with your Cosmos).
+  (default `v1.4.0`; set it to match the libraries installed with your Cosmos).
 - `--hullmap` — a `hullmap.json` from `artmap`, for real ship art.
 - `--event-model` — how 2.8 events are generated:
   - `hybrid` (default) — flag-chained "scene" events stay one readable sequence;

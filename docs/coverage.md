@@ -160,5 +160,5 @@ split on it too.
   property) become a `# when (verify by hand)` comment, so that event may fire without
   re-checking them.
 - **Comms/GM buttons** become routes; the selection/gating may need refining per mission.
-- Generated missions depend on the `a2x` layer in `sbs_utils` (v1.4.0_dev+) + the
+- Generated missions depend on the `a2x` layer in `sbs_utils` (v1.4.0+) + the
   feature-detected LegendaryMissions addons.
