@@ -87,13 +87,80 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
         header="//comms", handler_tag="if_comms_button",
         comment="# 2.8 comms buttons -> a //comms route (refine the gating/selection).",
         addons=["comms"]))
-    lines.extend(build_button_route(
-        mission, em, gm_btn_events, set_tag="set_gm_button",
-        header="//comms if has_roles(COMMS_ORIGIN_ID, 'gamemaster')",
-        handler_tag="if_gm_button",
-        comment="# 2.8 GM buttons -> a gamemaster-gated //comms route (game master console).",
-        addons=["gamemaster", "gamemaster_comms"]))
+    lines.extend(build_gm_tree_routes(mission, em, gm_btn_events))
     return "\n".join(lines) + "\n"
+
+
+GM_GATE = "if has_roles(COMMS_ORIGIN_ID, 'gamemaster')"
+
+
+def _button_body(em: Emitter, ev, handler_tag: str) -> list[str]:
+    """The inline body (8-space indented) for a `+ "label":` button."""
+    body: list[str] = []
+    if ev is None:
+        body.append(f"        # TODO: 2.8 button had no {handler_tag} handler")
+        body.append("        ~~ pass ~~")
+    else:
+        for c in ev.conditions:
+            if c.tag != handler_tag:
+                body.append(f"        # guard: {_xml_one(c)}")
+        for n in ev.commands:
+            body.append(f"        # {_xml_one(n)}")
+            for ln in em.emit_command(n):
+                body.append(("    " + ln) if ln.strip() else ln)
+    # A `+ "..":` block needs at least one real statement; an all-comment body is an
+    # empty block to MAST.
+    if not any(ln.strip() and not ln.strip().startswith("#") for ln in body):
+        body.append("        ~~ pass ~~")
+    return body
+
+
+def build_gm_tree_routes(mission: Mission, em: Emitter, gm_events: dict) -> list[str]:
+    """2.8 GM buttons -> a gamemaster-gated //comms tree. Slash-delimited button text
+    (``AI/Enemy/bombastic captain``) becomes nested //comms/gm/... submenu routes;
+    the final segment is the leaf button carrying the handler body."""
+    declared = [n.get("text", "") for n in mission.all_nodes()
+                if n.tag == "set_gm_button" and n.get("text")]
+    texts = list(dict.fromkeys(declared + list(gm_events)))
+    if not texts:
+        return []
+    em.addons.update({"gamemaster", "gamemaster_comms"})
+
+    root = {"kids": {}}
+    for text in texts:
+        node = root
+        for seg in (s.strip() for s in text.split("/") if s.strip()):
+            node = node["kids"].setdefault(seg, {"kids": {}, "event": None})
+        node["event"] = gm_events.get(text)
+
+    out = ["", "# 2.8 GM buttons -> a gamemaster-gated //comms tree (slash = submenu).",
+           f"//comms {GM_GATE}"]
+    out += _gm_buttons(em, root, "//comms/gm")
+    for seg, child in root["kids"].items():
+        if child["kids"]:
+            out += _gm_route(em, child, f"//comms/gm/{_slug(seg)}", back="//comms")
+    return out
+
+
+def _gm_buttons(em: Emitter, node: dict, child_base: str) -> list[str]:
+    """The `+` buttons for a node's children: nav buttons for branches, leaf bodies."""
+    out = []
+    for seg, child in node["kids"].items():
+        if child["kids"]:
+            out.append(f'    + "{_mast_str(seg)}" {child_base}/{_slug(seg)}')
+        else:
+            out.append(f'    + "{_mast_str(seg)}":')
+            out += _button_body(em, child.get("event"), "if_gm_button")
+    return out
+
+
+def _gm_route(em: Emitter, node: dict, route_path: str, back: str) -> list[str]:
+    out = ["", f"{route_path} {GM_GATE}", f'    + "Back" {back}']
+    out += _gm_buttons(em, node, route_path)
+    for seg, child in node["kids"].items():
+        if child["kids"]:
+            out += _gm_route(em, child, f"{route_path}/{_slug(seg)}", back=route_path)
+    return out
 
 
 def build_button_route(mission: Mission, em: Emitter, button_events: dict, *,
@@ -116,24 +183,7 @@ def build_button_route(mission: Mission, em: Emitter, button_events: dict, *,
     out = ["", comment, header]
     for t in texts:
         out.append(f'    + "{_mast_str(t)}":')
-        ev = button_events.get(t)
-        body: list[str] = []
-        if ev is None:
-            body.append(f"        # TODO: 2.8 button had no {handler_tag} handler")
-            body.append("        ~~ pass ~~")
-        else:
-            for c in ev.conditions:
-                if c.tag != handler_tag:
-                    body.append(f"        # guard: {_xml_one(c)}")
-            for n in ev.commands:
-                body.append(f"        # {_xml_one(n)}")
-                for ln in em.emit_command(n):
-                    body.append(("    " + ln) if ln.strip() else ln)
-        # A `+ "..":` block needs at least one real statement; an all-comment body is
-        # an empty block to MAST. Add a pass when nothing executable was emitted.
-        if not any(ln.strip() and not ln.strip().startswith("#") for ln in body):
-            body.append("        ~~ pass ~~")
-        out.extend(body)
+        out += _button_body(em, button_events.get(t), handler_tag)
     return out
 
 

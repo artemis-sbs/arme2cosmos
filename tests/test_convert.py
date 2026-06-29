@@ -312,6 +312,32 @@ class ConvertCommsButtonTests(unittest.TestCase):
         self.assertIn("wave = 1", story)
         self.assertIn("gamemaster", sjson)
 
+    def test_gm_slash_path_becomes_submenu_tree(self):
+        xml = os.path.join(self.tmp.name, "MISS_GmTree.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<mission_data version="2.8">
+  <mission_description>gm</mission_description>
+  <start>
+    <set_gm_button text="AI/Enemy/chase player"/>
+    <set_gm_button text="AI/Enemy/brave captain"/>
+  </start>
+  <event name="A"><if_gm_button text="AI/Enemy/chase player"/>
+    <set_variable name="x" value="1"/></event>
+</mission_data>""")
+        d = convert_file(xml, self.out + "tree")
+        s = open(os.path.join(d, "story.mast"), encoding="utf-8").read()
+        # root: nav into the AI submenu
+        self.assertIn('+ "AI" //comms/gm/ai', s)
+        # AI route: gated, Back, and nav into Enemy
+        self.assertIn("//comms/gm/ai if has_roles(COMMS_ORIGIN_ID, 'gamemaster')", s)
+        self.assertIn('+ "Back" //comms', s)
+        self.assertIn('+ "Enemy" //comms/gm/ai/enemy', s)
+        # Enemy route: gated, Back to parent, leaf buttons (display text preserved)
+        self.assertIn("//comms/gm/ai/enemy if has_roles(COMMS_ORIGIN_ID, 'gamemaster')", s)
+        self.assertIn('+ "Back" //comms/gm/ai', s)
+        self.assertIn('+ "chase player":', s)
+        self.assertIn('+ "brave captain":', s)
+
     def test_comment_only_button_body_gets_noop(self):
         # a button whose handler emits only comments must still have a real
         # statement (~~ pass ~~), else the + block is empty and MAST rejects it.
