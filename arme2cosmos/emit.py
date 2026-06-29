@@ -259,9 +259,21 @@ class Emitter:
         return [f"    a2x_destroy({var})"]
 
     def c_destroy_near(self, n: XmlNode) -> list[str]:
-        self.note(f"destroy_near type={n.get('type')}: query terrain near a point and "
-                  f"delete -- wire by hand")
-        return [f"    # TODO destroy_near: {_xml_repr(n)}"]
+        kind = n.get("type", "all")
+        if n.get("name"):  # destroy near a named object -> no point known at convert time
+            self.note(f"destroy_near near object '{n.get('name')}': use that object's "
+                      f"position (a2x_destroy_near takes a point) -- wire by hand")
+            return [f"    # TODO destroy_near near \"{n.get('name')}\": {_xml_repr(n)}"]
+        cx, cy, cz = self._xyz(n, "centerX", "centerY", "centerZ")
+        return [f'    a2x_destroy_near({cx}, {cy}, {cz}, {n.get("radius", "0")}, "{kind}")']
+
+    def c_set_side_value(self, n: XmlNode) -> list[str]:
+        obj = self.symbols.get(n.get("name"))
+        if obj is None and n.get("player_slot") is not None:
+            obj = self.player_var
+        if obj is None:
+            return [f"    # TODO set_side_value: {_xml_repr(n)}"]
+        return [f'    a2x_set_side_value({obj}, {_value(n.get("value", "0"))})']
 
     def c_direct(self, n: XmlNode) -> list[str]:
         var = self.symbols.get(n.get("name"))
@@ -510,6 +522,7 @@ _COMMAND_EMIT = {
     "play_sound_now": Emitter.c_play_sound,
     "set_player_grid_damage": Emitter.c_grid_damage,
     "set_special": Emitter.c_set_special,
+    "set_side_value": Emitter.c_set_side_value,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
     "incoming_message": Emitter.c_incoming_message,
