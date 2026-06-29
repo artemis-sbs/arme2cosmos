@@ -348,6 +348,14 @@ class Emitter:
     def c_clear_gm_button(self, n: XmlNode) -> list[str]:
         return [f'    # clear_gm_button "{n.get("text","")}"']
 
+    def c_set_relative_position(self, n: XmlNode) -> list[str]:
+        obj = self.symbols.get(n.get("name2"))
+        ref = self.symbols.get(n.get("name1"))
+        if obj is None or ref is None:
+            return [f"    # TODO set_relative_position: {_xml_repr(n)}"]
+        return [f"    a2x_set_relative_position({obj}, {ref}, "
+                f"{_value(n.get('angle', '0'))}, {_value(n.get('distance', '0'))})"]
+
     def c_addto_object_property(self, n: XmlNode) -> list[str]:
         var = self.symbols.get(n.get("name"))
         prop, val = n.get("property", "?"), n.get("value", "0")
@@ -482,6 +490,7 @@ _COMMAND_EMIT = {
     "addto_object_property": Emitter.c_addto_object_property,
     "copy_object_property": Emitter.c_copy_object_property,
     "set_ship_text": Emitter.c_set_ship_text,
+    "set_relative_position": Emitter.c_set_relative_position,
     "set_comms_button": Emitter.c_set_comms_button,
     "clear_comms_button": Emitter.c_clear_comms_button,
     "set_gm_button": Emitter.c_set_gm_button,
