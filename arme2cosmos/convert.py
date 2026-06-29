@@ -33,6 +33,7 @@ def _display_name(mission: Mission) -> str:
 
 
 def build_story_mast(mission: Mission, em: Emitter) -> str:
+    _prescan_named_objects(mission, em)
     label = _slug(mission.name)
     disp = _display_name(mission)
     lines: list[str] = []
@@ -48,6 +49,11 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
         if d:
             lines.append(f'" {d}')
     lines.append("    shared main_story_task = mast_task")
+    obj_vars = sorted(set(em.symbols.values()) | ({em.player_var} if em.player_var else set()))
+    if obj_vars:
+        lines.append("    # objects forward-declared so references resolve before/across creates")
+        for v in obj_vars:
+            lines.append(f"    default {v} = None")
     lines.append("")
     lines.append("    # --- start block ---")
     for n in mission.start:
@@ -92,6 +98,29 @@ def build_story_mast(mission: Mission, em: Emitter) -> str:
 
 
 GM_GATE = "if has_roles(COMMS_ORIGIN_ID, 'gamemaster')"
+
+
+# create kinds that are captured into a MAST variable (mirror of the c_* emitters).
+_CAPTURED_CREATES = {"create:station", "create:enemy", "create:neutral",
+                     "create:monster", "create:whale", "create:genericMesh",
+                     "create:Anomaly", "create:blackHole"}
+
+
+def _prescan_named_objects(mission: Mission, em: Emitter) -> None:
+    """Register every named created object up front so later commands resolve them
+    regardless of emission order (forward references, button-handler events)."""
+    for n in mission.all_nodes():
+        if n.tag != "create":
+            continue
+        name = n.get("name")
+        if not name:
+            continue
+        kind = n.kind_key()
+        if kind == "create:player":
+            em.player_var = "player_ship"
+            em.symbols.setdefault(name, "player_ship")
+        elif kind in _CAPTURED_CREATES:
+            em._var_for(name)
 
 
 def _button_body(em: Emitter, ev, handler_tag: str) -> list[str]:
