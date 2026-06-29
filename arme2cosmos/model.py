@@ -34,11 +34,24 @@ class XmlNode:
         """A finer-grained key for coverage: ``create`` is split by its ``type``.
 
         e.g. ``create type="enemy"`` -> ``create:enemy``; everything else -> the tag.
+        The ``type`` is normalized case-insensitively (2.8 missions use both ``enemy``
+        and ``Enemy``, ``anomaly`` and ``Anomaly``, etc.) to its canonical spelling.
         """
         if self.tag == "create":
             t = (self.attrib.get("type") or "").strip()
-            return f"create:{t}" if t else "create"
+            if not t:
+                return "create"
+            return f"create:{_CREATE_CANON.get(t.lower(), t)}"
         return self.tag
+
+
+# 2.8 `create` type (lower-cased) -> the canonical spelling the emitter dispatches on.
+_CREATE_CANON = {
+    "player": "player", "enemy": "enemy", "neutral": "neutral", "station": "station",
+    "monster": "monster", "whale": "whale", "anomaly": "Anomaly",
+    "blackhole": "blackHole", "genericmesh": "genericMesh",
+    "nebulas": "nebulas", "asteroids": "asteroids", "mines": "mines",
+}
 
 
 @dataclass

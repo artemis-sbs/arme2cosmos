@@ -86,3 +86,13 @@ class ParserTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CreateTypeCaseTests(unittest.TestCase):
+    def test_kind_key_normalizes_create_type_case(self):
+        from arme2cosmos.model import XmlNode
+        self.assertEqual(XmlNode("create", {"type": "Enemy"}).kind_key(), "create:enemy")
+        self.assertEqual(XmlNode("create", {"type": "STATION"}).kind_key(), "create:station")
+        self.assertEqual(XmlNode("create", {"type": "Anomaly"}).kind_key(), "create:Anomaly")
+        self.assertEqual(XmlNode("create", {"type": "blackhole"}).kind_key(), "create:blackHole")
+        self.assertEqual(XmlNode("create", {"type": "genericMesh"}).kind_key(), "create:genericMesh")
