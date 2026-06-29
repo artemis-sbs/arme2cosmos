@@ -112,10 +112,13 @@ def build_parser() -> argparse.ArgumentParser:
                       help="sbslib/mastlib version tag for story.json (default: v1.4.0_dev)")
     conv.add_argument("--hullmap", default=None,
                       help="hullmap.json (from `artmap`) to resolve real ship art")
-    conv.add_argument("--event-model", choices=["hybrid", "linear"], default="hybrid",
+    conv.add_argument("--event-model", choices=["hybrid", "linear", "a28_compatible"],
+                      default="hybrid",
                       help="hybrid (default): flag-chained scenes stay linear, "
-                           "independent events run as concurrent tasks; "
-                           "linear: one sequential scene chain")
+                           "independent events run as concurrent tasks/routes; "
+                           "linear: one sequential scene chain; "
+                           "a28_compatible: every event becomes its own polling task "
+                           "(2.8 flat-event model -- the worst-case faithful fallback)")
     conv.set_defaults(func=_cmd_convert)
 
     art = sub.add_parser("artmap", help="draft the vesselData<->shipDataBB hull crosswalk")

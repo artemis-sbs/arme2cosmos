@@ -124,10 +124,14 @@ Options:
 - `--hullmap` — a `hullmap.json` from `artmap`, for real ship art.
 - `--event-model` — how 2.8 events are generated:
   - `hybrid` (default) — flag-chained "scene" events stay one readable sequence;
-    events with independent triggers (a timer/distance/dock not gated by the chain)
-    run as concurrent tasks, matching how 2.8 checks all events every tick.
-  - `linear` — force every event into a single sequential chain (simpler to read /
+    independent events run concurrently, and the ones the engine can push
+    (respawn-on-destroy, dock, flag) become event-driven routes instead of polling.
+    Matches how 2.8 checks all events every tick, without always-on tasks where avoidable.
+  - `linear` — force every event into a single sequential chain (simplest to read /
     hand-edit; use for missions you know are strictly sequential).
+  - `a28_compatible` — every event becomes its own continuous polling task, exactly
+    like 2.8's flat-event model. No classification, no chain, no routes: the worst-case
+    faithful fallback to reach for if a `hybrid` conversion behaves wrong.
 
 ### What it translates for you
 

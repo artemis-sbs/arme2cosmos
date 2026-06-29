@@ -81,26 +81,37 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
         else:
             plain_events.append(ev)
 
-    # 'linear' = one sequential scene chain; 'hybrid' (default) = flag-chained scenes
-    # stay linear, independent events run concurrently (2.8's flat-event model).
+    # Event model:
+    #   'linear'         = one sequential scene chain (most readable, least faithful).
+    #   'hybrid' (default) = flag-chained scenes stay linear, independent events run
+    #                      concurrently, the engine-pushable ones become routes.
+    #   'a28_compatible' = every event becomes its own continuous polling task, exactly
+    #                      like 2.8's flat-event model -- the worst-case faithful fallback
+    #                      (no classification, no chain, no routes).
     if event_model == "linear":
         seq_events, indep_events = plain_events, []
+    elif event_model == "a28_compatible":
+        seq_events, indep_events = [], plain_events
     else:
         seq_events, indep_events = _classify_events(plain_events)
 
     # Independent events: convert the ones the engine can PUSH into event-driven routes
     # (respawn-on-destroy, dock, flag-signal) so they don't poll; the rest stay loops.
+    # a28_compatible skips routing entirely -- every event is a uniform polling task.
     respawn_events, dock_events, flag_events, loop_events = [], [], [], []
-    for ev in indep_events:
-        rn = _respawn_name(ev)
-        if rn and rn in em.symbols:
-            respawn_events.append(ev)
-        elif _is_dock(ev):
-            dock_events.append(ev)
-        elif _flag_signal(ev) is not None:
-            flag_events.append(ev)
-        else:
-            loop_events.append(ev)
+    if event_model == "a28_compatible":
+        loop_events = list(indep_events)
+    else:
+        for ev in indep_events:
+            rn = _respawn_name(ev)
+            if rn and rn in em.symbols:
+                respawn_events.append(ev)
+            elif _is_dock(ev):
+                dock_events.append(ev)
+            elif _flag_signal(ev) is not None:
+                flag_events.append(ev)
+            else:
+                loop_events.append(ev)
     em.signal_flags = {_pyname(_flag_signal(ev).get("name")) for ev in flag_events}
     if dock_events:
         em.addons.add("docking")

@@ -214,6 +214,16 @@ class ConvertEventLoopTests(unittest.TestCase):
         with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
             return f.read()
 
+    def test_a28_compatible_makes_every_event_a_polling_task(self):
+        # worst-case faithful: no chain, no routes -- both events become ind_event loops.
+        d = convert_file(self.xml, self.out + "a", event_model="a28_compatible")
+        story = open(os.path.join(d, "story.mast"), encoding="utf-8").read()
+        self.assertIn("=== ind_event_0", story)
+        self.assertIn("=== ind_event_1", story)
+        self.assertNotIn("--- event_0", story)            # no sequential chain
+        self.assertNotIn("//damage/destroy", story)       # no push routes
+        self.assertNotIn("//signal/a2x_flag", story)
+
     def test_respawn_event_becomes_destroy_route(self):
         # if_not_exists Sentry -> an event-driven //damage/destroy route (no polling):
         # spawn once initially, then respawn whenever the tagged object is destroyed.
