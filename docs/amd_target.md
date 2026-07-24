@@ -233,12 +233,15 @@ child does, so a fleet of individual kills reads as one mission objective. Left 
 (all children required, no auto-`Win:`); which kills are optional and whether clearing
 the fleet wins are per-mission decisions (flagged as a TODO on the parent).
 
-**Remaining caveats:**
-- A **phase-gated** friendly `if_not_exists` (watcher branch, not the native branch)
-  still reads as a completion rather than a protect-fail; only the sole/native case is
-  side-aware so far.
+Side-awareness covers **both** branches: a sole friendly death → `Fail on all dead:`
+(event-driven, native branch); a **phase-gated** friendly death → `Fail on signal:
+<gate>` (the watcher fires the same `quest_signal` that `quest_on_signal` also uses to
+**fail** a quest), still deferred/secret via the reveal graph. Both title as
+`Protect <name>` and route the 2.8 body on `//signal/quest_failed`.
+
+**Remaining caveat:**
 - The `hostile_fleet` parent groups *all* enemy kills; genuinely optional/bonus targets
-  aren't split out (the TODO says so).
+  aren't split out (the TODO on the parent says so).
 
 ## What stays MAST (graceful degradation)
 

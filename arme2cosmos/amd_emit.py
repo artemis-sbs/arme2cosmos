@@ -68,6 +68,7 @@ class Quest:
         self.protect_name: str | None = None  # friendly protect target -> "Protect <name>"
         self.critical = False
         self.fail_on_all_dead: str | None = None
+        self.fail_on_signal: str | None = None  # `Fail on signal: <sig>` (protect watcher)
         self.win: str | bool | None = None   # prose reason, True (bare flag), or None
         self.lose: str | bool | None = None
         self.desc = ""
@@ -92,6 +93,8 @@ class Quest:
             out.append("Critical: true")
         if self.fail_on_all_dead:
             out.append(f"Fail on all dead: {self.fail_on_all_dead}")
+        if self.fail_on_signal:
+            out.append(f"Fail on signal: {self.fail_on_signal}")
         for label, val in (("Win", self.win), ("Lose", self.lose)):
             if val is True:
                 out.append(f"{label}: true")
@@ -316,7 +319,8 @@ class AmdBuilder:
         self._wire_reveal_graph()  # defer phase-gated watchers until their phase is reached
         self._aggregate_kills(used_ids)  # roll per-ship kills under one Parent quest
         # if nothing produced a real objective, still give the log a root quest
-        if not any(q.goal or q.when or q.fail_on_all_dead for q in self.quests):
+        if not any(q.goal or q.when or q.fail_on_all_dead or q.fail_on_signal
+                   or q.win or q.lose for q in self.quests):
             root = Quest("main", "Mission")
             root.desc = _amd_text(self.mission.description) or "Complete the mission."
             root.todos.append("no auto-mapped objective -- author Goal:/Win:/Lose: by hand")
@@ -500,11 +504,22 @@ class AmdBuilder:
         expr = [c for c in conds if _cond_bool(self.em, c) is not None]
         if expr:
             sig, label = self._new_gate(expr)
-            q.when = f"signal {sig}"
             q.gate_label = label
             # surviving `if_variable F == v` guards are phase gates -> reveal-graph inputs
             q.phase_gates = [(c.get("name"), _num_key(c.get("value")), c.get("value"))
                              for c in kept_flags if _num_key(c.get("value")) is not None]
+            # a phase-gated friendly/neutral death is a PROTECT-fail, not a completion:
+            # the same watcher signal FAILS the quest (quest_on_signal handles both).
+            friendly = next((c for c in reals if c.tag == "if_not_exists"
+                             and not _is_player_ref(self.em, c)
+                             and self._target_side(c.get("name")) in ("friendly", "neutral")),
+                            None)
+            if friendly is not None:
+                q.fail_on_signal = sig
+                q.body_signal = "quest_failed"
+                q.protect_name = friendly.get("name")
+            else:
+                q.when = f"signal {sig}"
         else:
             q.todos.append(f"trigger not expressible: {' '.join(_xml_one(c) for c in conds)}")
 
