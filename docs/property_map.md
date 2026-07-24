@@ -37,14 +37,14 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `angleDelta` (72) | engine | `engine_object.steer_yaw` | **DONE** | |
 | `rollDelta` (107) | engine | `engine_object.steer_roll` | **DONE** | |
 | `pitchDelta` (5) | engine | `engine_object.steer_pitch` | **DONE** | |
-| `turnRate` (90) | data_set | `turnRate` | **DONE** | |
+| `turnRate` (90) | data_set | `turn_rate` | **DONE** | FIXED: was `turnRate` (dead key the engine never reads); the steering physics (NPC + player) reads `turn_rate` |
 | `throttle` (9) | data_set | `throttle` | **DONE** | |
 | `artScale` (89) | data_set | `local_scale_coeff` | **DONE** | |
 | `angle` (137) | engine | heading (radians) -> engine_object orientation | VERIFY | which engine attr sets heading? |
 | `pitch` (13) | engine | engine_object orientation | VERIFY | |
 | `roll` (24) | engine | engine_object orientation | VERIFY | |
-| `topSpeed` (564) | data_set | `speed_coeff` (0-1) or `max_throttle`? | VERIFY | 2.8 was absolute; Cosmos uses a coeff |
-| `currentRealSpeed` (26) | — | read-only in 2.8 | HUMAN | likely no setter; drop? |
+| `topSpeed` (564) | data_set | `speed_coeff` (0-1) | **DONE** | PROVEN behaviorally vs the mock engine physics: NPC cruise = throttle x 36 u/s x speed_coeff (1.0/0.5/0.25 -> 36/18/9). 2.8 topSpeed values are already 0-1 coeffs (1:1). **NPC-only** -- Cosmos player top speed is fixed (playerThrottle x 180, no speed_coeff), so on a player it's a harmless no-op (0 corpus sites use player_slot) |
+| `currentRealSpeed` (26) | obj | `cur_speed` (space_object attr) | **DONE** | read side: physics-driven current speed; setting is overwritten each tick (effectively read-only) |
 | `pushRadius` (269) | — | no key found (`exclusion_radius`?) | HUMAN | |
 | `deltaX` (2) | — | velocity; no data_set key | HUMAN | drop? |
 | `blocksShotFlag` (67) | — | no equivalent | HUMAN | |
@@ -151,11 +151,13 @@ Beyond `set_object_property`, these 2.8 commands are also wired:
 ## Summary
 
 - **DONE (verified, emitting real calls):** `position*` (with flip), `angleDelta`/
-  `rollDelta`/`pitchDelta`, `turnRate`, `throttle`, `artScale`, `energy`,
-  `hasSurrendered`, `shieldsOn`, `shieldState{Front,Back}`, `shieldMaxState{Front,Back}`,
-  `missileStores{Nuke,Homing,Mine,EMP}`, `count{Nuke,Homing,Mine,EMP}` -- plus the
-  `addto` / `copy` / `set_ship_text` / `set_relative_position` / `set_special` commands.
-- **VERIFY (need your confirm):** `angle`/`pitch`/`roll` heading writes, `topSpeed`,
+  `rollDelta`/`pitchDelta`, `turnRate` (-> `turn_rate`), `topSpeed` (-> `speed_coeff`,
+  behaviorally proven, NPC-only), `currentRealSpeed` (-> `cur_speed`, read), `throttle`,
+  `artScale`, `energy`, `hasSurrendered`, `shieldsOn`, `shieldState{Front,Back}`,
+  `shieldMaxState{Front,Back}`, `missileStores{Nuke,Homing,Mine,EMP}`,
+  `count{Nuke,Homing,Mine,EMP}` -- plus the `addto` / `copy` / `set_ship_text` /
+  `set_relative_position` / `set_special` commands.
+- **VERIFY (need your confirm):** `angle`/`pitch`/`roll` heading writes,
   `shieldState`, the `systemCurHeat*` / `systemDamage*` 8->4 index mapping, `warpState`,
   `eliteAbilityBits` bit-decomposition, `sideValue`->roles, `musicObjectMasterVolume`.
 - **HUMAN (need a Cosmos key, or "drop"):** the rest -- `pushRadius`, `surrenderChance`,

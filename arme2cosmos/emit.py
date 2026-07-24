@@ -36,6 +36,7 @@ _FLEET_COEFF = {"nonPlayerSpeed", "nonPlayerShield", "nonPlayerWeapon",
 
 _AUTO_PROPS = {
     "positionX", "positionY", "positionZ",
+    "topSpeed", "currentRealSpeed",
     "angleDelta", "rollDelta", "pitchDelta", "turnRate", "throttle", "artScale",
     "energy", "hasSurrendered", "shieldsOn", "shieldStateFront", "shieldStateBack",
     "shieldMaxStateFront", "shieldMaxStateBack", "missileStoresNuke",
