@@ -87,6 +87,7 @@ class Emitter:
         # text (the AMD target stores it as an inventory value + a gated //comms Hail route).
         self.hails: dict[str, str] = {}
         self.hail_done: set[str] = set()  # objects already given their stored hail value
+        self.wait_prop_n = 0  # unique-label counter for if_object_property poll waits
 
     def _art(self, n: XmlNode, default: str) -> str:
         """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),
@@ -694,8 +695,9 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0) -> list[str]:
     if tag == "if_object_property":
         b = _cond_bool(em, n)  # mapped props -> a live boolean; poll until it holds
         if b:
-            return [f"---wait_prop_{idx}", "    await delay_sim(0.5)",
-                    f"    jump wait_prop_{idx} if not ({b})"]
+            em.wait_prop_n += 1  # unique per condition (an event can have several)
+            lbl = f"wait_prop_{em.wait_prop_n}"
+            return [f"---{lbl}", "    await delay_sim(0.5)", f"    jump {lbl} if not ({b})"]
     return [f"    # when: {_xml_repr(n)}"]
 
 

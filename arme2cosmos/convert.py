@@ -34,6 +34,8 @@ def _display_name(mission: Mission) -> str:
 
 def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid") -> str:
     _prescan_named_objects(mission, em)
+    em.emit_scan_roles = True  # recover set_ship_text scan_desc / hailtext (see below)
+    _prescan_scan_hail(mission, em)
     label = _slug(mission.name)
     disp = _display_name(mission)
     lines: list[str] = []
@@ -128,6 +130,13 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
         lines.extend(em.emit_command(n))
     lines.append("")
 
+    if em.scans:  # 2.8 set_ship_text scan_desc -> declarative science scans (scans.amd)
+        em.addons.add("science_scans")
+        lines.append("    # 2.8 set_ship_text scan_desc -> declarative science scans")
+        lines.append('    science_define_scan_amd(document_get_amd_file('
+                     'get_mission_dir_filename("scans.amd"), data_parser=amd_scan_data))')
+        lines.append("")
+
     if loop_events or respawn_events:
         lines.append("    # independent events: start polling loops + initial respawns")
         for i, _ev in enumerate(loop_events):
@@ -214,7 +223,29 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
         comment="# 2.8 comms buttons -> a //comms route (refine the gating/selection).",
         addons=["comms"]))
     lines.extend(build_gm_tree_routes(mission, em, gm_btn_events))
+    if em.hails:  # 2.8 set_ship_text hailtext -> a Hail comms button (per-ship stored hail)
+        em.addons.add("comms")
+        lines += [
+            "",
+            "# 2.8 set_ship_text hailtext -> a Hail comms button (per-ship stored hail).",
+            '//comms if is_space_object_id(COMMS_SELECTED_ID) and '
+            'get_inventory_value(COMMS_SELECTED_ID, "a2x_hail", "") != ""',
+            '    + "Hail":',
+            '        comms_receive(get_inventory_value(COMMS_SELECTED_ID, "a2x_hail", ""), '
+            'title="Hail")',
+        ]
     return "\n".join(lines) + "\n"
+
+
+def _prescan_scan_hail(mission: Mission, em: Emitter) -> None:
+    """Populate em.scans / em.hails from set_ship_text so the science-scan load call and
+    the Hail route are emitted even when the set_ship_text lives in an event body."""
+    for nd in mission.all_nodes():
+        if nd.tag == "set_ship_text" and em.symbols.get(nd.get("name")):
+            if nd.get("scan_desc") is not None:
+                em.scans[nd.get("name")] = _mast_str(nd.get("scan_desc"))
+            if nd.get("hailtext") is not None:
+                em.hails[nd.get("name")] = _mast_str(nd.get("hailtext"))
 
 
 GM_GATE = "if has_roles(COMMS_ORIGIN_ID, 'gamemaster')"
@@ -552,6 +583,9 @@ def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSIO
             "MIGRATION_NOTES.md": build_notes(mission, em),
             "__lib__.json": '{"version": "' + lib_version + '"}\n',
         }
+        if em.scans:  # recovered 2.8 scan_desc as declarative science scans
+            from .amd_emit import _build_scans_amd
+            files["scans.amd"] = _build_scans_amd(em.scans)
 
     out_dir = os.path.join(out_root, _slug(mission.name))
     os.makedirs(out_dir, exist_ok=True)
