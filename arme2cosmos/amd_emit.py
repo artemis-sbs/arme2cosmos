@@ -17,7 +17,7 @@ semantics: an ambiguous end-game event is emitted with a ``// TODO win or lose?`
 from __future__ import annotations
 
 from .emit import (Emitter, emit_condition, _cond_bool, _pyname, _mast_str, _value,
-                   _num_key, _phase_sig_name, _SIDE)
+                   _num_key, _phase_sig_name, _SIDE, _is_less)
 from .model import Event, Mission, XmlNode
 
 # Keywords that classify an end-game decider event as a win or a loss (matched against
@@ -403,6 +403,31 @@ class AmdBuilder:
                 out.append(c)
         return out
 
+    def _reach_trigger(self, conds: list) -> tuple | None:
+        """A player-approaches-object ``if_distance`` (LESS) -> (role, radius) for a
+        ``Goal: reach``; else None. One side must be the player, the other a captured
+        object (the landmark to reach); the object is tagged with a role."""
+        for c in conds:
+            if c.tag != "if_distance" or not _is_less(c.get("comparator")):
+                continue
+            pv = self.em.player_var
+            p1 = c.get("player_slot1") is not None or self.em.symbols.get(c.get("name1")) == pv
+            p2 = c.get("player_slot2") is not None or self.em.symbols.get(c.get("name2")) == pv
+            target = None
+            if p1 and self.em.symbols.get(c.get("name2")):
+                target = c.get("name2")
+            elif p2 and self.em.symbols.get(c.get("name1")):
+                target = c.get("name1")
+            if target:
+                role = _pyname(target).lower()
+                self._add_role(self.em.symbols[target], role)
+                try:
+                    radius = int(float(c.get("value", "5000")))
+                except ValueError:
+                    radius = 5000
+                return role, radius
+        return None
+
     def _target_side(self, name: str | None) -> str | None:
         """The Cosmos side ('enemy'/'friendly'/'neutral') of a named 2.8 object, from its
         create node's sideValue; None if unknown."""
@@ -499,6 +524,14 @@ class AmdBuilder:
             if c.tag == "if_fleet_count" and c.get("fleetnumber"):
                 fl = c.get("fleetnumber")
                 q.goal = f"destroy {_fleet_sizes(self.mission).get(fl, 1)} fleet_{fl}"
+                return
+        # native reach goal: player approaches a captured object (2.8 if_distance LESS),
+        # not phase-gated -> `Goal: reach <role> <radius>` (quest_tick_reach completes it)
+        if not kept_flags:
+            reach = self._reach_trigger(conds)
+            if reach is not None:
+                role, radius = reach
+                q.goal = f"reach {role} {radius}"
                 return
         # otherwise a watcher ANDs the real trigger with any surviving phase-gate flags
         expr = [c for c in conds if _cond_bool(self.em, c) is not None]
