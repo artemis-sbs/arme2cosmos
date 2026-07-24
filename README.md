@@ -1,13 +1,23 @@
 # arme2cosmos
 
 A migration **assistant** that ports legacy **Artemis 2.8** XML missions (`MISS_*.xml`)
-to **Artemis Cosmos** MAST. It is a *scaffolder*, not a perfect compiler: the goal is to
-get a mission **80–90% of the way** to a runnable Cosmos mission and leave a clear,
-per-item punch-list (`MIGRATION_NOTES.md`) for you to finish.
+to **Artemis Cosmos**. It is a *scaffolder*, not a perfect compiler: the goal is to get a
+mission **80–90% of the way** to a runnable Cosmos mission and leave a clear, per-item
+punch-list (`MIGRATION_NOTES.md`) for you to finish.
 
-- **No dependencies** — Python 3.10+ is all you need.
-- Output is idiomatic MAST: every translatable command becomes a real call; everything
-  else is a `# TODO` with the original XML preserved inline.
+It can produce the mission in either of two styles (`--target`):
+
+- **`mast`** (default) — an idiomatic MAST scaffold: the 2.8 event model translated
+  into MAST tasks/routes.
+- **`amd`** — a **declarative quest-tree** mission (`story.amd` + a thin `story.mast`):
+  2.8 objectives, win/lose, and story beats become Cosmos quests with a live objectives
+  log. See [`docs/amd_target.md`](docs/amd_target.md).
+
+- **No dependencies** — Python 3.10+ is all you need to *run the tool*. (The missions it
+  generates depend on the `a2x` layer in `sbs_utils` and the LegendaryMissions addons at
+  Cosmos *run* time — never at the tool's build time.)
+- Every translatable command becomes a real call; everything else is a `# TODO` with the
+  original XML preserved inline.
 
 ---
 
@@ -51,6 +61,8 @@ arme2cosmos report /path/to/Artemis2.8/dat/missions/MISS_TheEndOfPeace
 # 3. Scaffold it, using the hullmap for real ship art.
 arme2cosmos convert /path/to/Artemis2.8/dat/missions/MISS_TheEndOfPeace \
     --hullmap hullmap.json --out out/
+#    ...or emit a quest-tree mission with an objectives log:
+#    arme2cosmos convert <path> --target amd --hullmap hullmap.json --out out/
 
 # 4. Open out/<name>/MIGRATION_NOTES.md and finish the TODOs by hand.
 ```
@@ -102,14 +114,16 @@ will use a placeholder you can swap later.
 ## `convert` — scaffold a mission
 
 ```sh
-arme2cosmos convert <path> [--out out] [--lib-version v1.4.0] [--hullmap hullmap.json]
+arme2cosmos convert <path> [--out out] [--target mast|amd] [--lib-version v1.4.0] [--hullmap hullmap.json]
 ```
 
 Creates a ready-to-open Cosmos mission folder:
 
 ```
 out/<name>/
-├── story.mast           # the translated mission (the main file)
+├── story.mast           # the translated mission (thin, on --target amd)
+├── story.amd            # (--target amd) the quest tree: objectives, win/lose, story beats
+├── scans.amd            # recovered 2.8 scan_desc as declarative science scans (if any)
 ├── script.py            # standard Cosmos entry-point boilerplate
 ├── story.json           # the sbslib + LegendaryMissions addons the mission needs
 ├── description.yaml     # mission browser entry
@@ -119,10 +133,12 @@ out/<name>/
 
 Options:
 - `--out` — where to write (default `out/`).
+- `--target` — the output style, `mast` (default) or `amd` (see **Two output styles** below).
 - `--lib-version` — the library version tag written into `story.json`
   (default `v1.4.0`; set it to match the libraries installed with your Cosmos).
 - `--hullmap` — a `hullmap.json` from `artmap`, for real ship art.
-- `--event-model` — how 2.8 events are generated:
+- `--event-model` — how 2.8 events are generated (**`mast` target only**; `amd` builds a
+  quest tree instead):
   - `hybrid` (default) — flag-chained "scene" events stay one readable sequence;
     independent events run concurrently, and the ones the engine can push
     (respawn-on-destroy, dock, flag) become event-driven routes instead of polling.
@@ -132,6 +148,23 @@ Options:
   - `a28_compatible` — every event becomes its own continuous polling task, exactly
     like 2.8's flat-event model. No classification, no chain, no routes: the worst-case
     faithful fallback to reach for if a `hybrid` conversion behaves wrong.
+
+### Two output styles (`--target`)
+
+- **`mast`** (default) — the classic scaffold: 2.8 events translated into MAST tasks and
+  routes, controlled by `--event-model`. Best when you want to read/hand-edit the mission
+  as MAST.
+- **`amd`** — a **declarative quest-tree** mission. Instead of hand-wiring the event
+  machinery, it emits a `story.amd` where 2.8 objectives, win/lose, and narrative become
+  Cosmos **quests** the LegendaryMissions `quest_driver` runs — so the port gets a live
+  **objectives log** for free. It builds: kill / reach / dock / scan objectives, a
+  `Win`/`Lose`/`Critical` end-game tree, timed and flag-driven **reveal chains**, "protect"
+  objectives for friendly targets, and **story-beat** quests for narrative moments. The
+  `story.mast` it emits is thin (spawn the start block, tag roles, grant the quests, carry
+  the imperative bits as `//signal` routes). See [`docs/amd_target.md`](docs/amd_target.md).
+
+Both targets compile the full a28 corpus; both recover 2.8 `set_ship_text scan_desc`
+(→ science scans) and `hailtext` (→ a Hail comms button).
 
 ### What it translates for you
 
@@ -148,7 +181,11 @@ don't have to think about it). Translated mechanically:
   waits (distance, sphere, fleet destroyed, docked, object exists, timers).
 - **Comms buttons** — become a comms menu (`//comms` route).
 - **Game Master buttons** — become a Game-Master comms menu.
+- **Ship text** — name / race / class / description; a ship's `scan_desc` is recovered as
+  a declarative **science scan** (`scans.amd`) and its `hailtext` as a **Hail** comms button.
 - **Tags** — preserved as object data, with notes on rebuilding the tag gameplay.
+- **Objectives (`--target amd`)** — the mission's win/lose and objective structure become a
+  Cosmos quest tree with a live objectives log (see **Two output styles** above).
 
 ### What you finish by hand
 
