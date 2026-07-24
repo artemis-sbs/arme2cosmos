@@ -219,14 +219,26 @@ their phase; 203/929 watchers no longer poll from t=0** (Cruiser 148/230 = 64%).
 Multi-gate / start-produced / unproduced gates stay active from the start (correctness
 over cleverness).
 
-**Caveats / next refinements (known):**
-- **Friendly-target kills.** `if_not_exists <friendly base>` becomes `Goal: destroy 1
-  <base>` even when destroying it is a **penalty/loss** (e.g. Cruiser's
-  "DS1 Destroyed / Penalty -90 kilotons"). A side-aware pass should route a
-  friendly-target `if_not_exists` to a `Lose:`/penalty instead of a goal.
-- **Aggregation.** A tournament's N per-pirate kills should roll under a `Parent:`
-  "Destroy the pirate fleet" with `Required:` children (or one `Goal: destroy N
-  pirates`) rather than N separate log entries.
+**Side-aware kills (implemented).** `if_not_exists <target>` is read against the
+target's 2.8 `sideValue`: an **enemy** target → `Goal: destroy 1 <role>`; a
+**friendly/neutral** target → a **protect** objective `Fail on all dead: <role>`
+(destroying it is a penalty/loss, not a goal), titled `Protect <name>`, with its 2.8
+body routed on `//signal/quest_failed` (the penalty payload). Corpus: 13 protect
+quests in Cruiser alone (e.g. `Protect DS1`, was a backwards `destroy` goal).
+
+**Kill aggregation (implemented).** When a mission has >=3 per-ship
+`Goal: destroy 1 <role>` objectives, they roll under one synthetic `Parent: hostile_fleet`
+("Destroy the hostile fleet") as `Required:` children — the parent completes when every
+child does, so a fleet of individual kills reads as one mission objective. Left flat
+(all children required, no auto-`Win:`); which kills are optional and whether clearing
+the fleet wins are per-mission decisions (flagged as a TODO on the parent).
+
+**Remaining caveats:**
+- A **phase-gated** friendly `if_not_exists` (watcher branch, not the native branch)
+  still reads as a completion rather than a protect-fail; only the sole/native case is
+  side-aware so far.
+- The `hostile_fleet` parent groups *all* enemy kills; genuinely optional/bonus targets
+  aren't split out (the TODO says so).
 
 ## What stays MAST (graceful degradation)
 

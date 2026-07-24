@@ -17,7 +17,7 @@ semantics: an ambiguous end-game event is emitted with a ``// TODO win or lose?`
 from __future__ import annotations
 
 from .emit import (Emitter, emit_condition, _cond_bool, _pyname, _mast_str, _value,
-                   _num_key, _phase_sig_name)
+                   _num_key, _phase_sig_name, _SIDE)
 from .model import Event, Mission, XmlNode
 
 # Keywords that classify an end-game decider event as a win or a loss (matched against
@@ -62,6 +62,10 @@ class Quest:
         self.reveal: str | None = None     # `Then: reveal <key>` (reveal chain)
         self.gate_label: str | None = None  # its escape-hatch watcher label (if When: signal)
         self.phase_gates: list = []         # [(flag, vkey, vraw)] surviving phase-gate flags
+        self.parent: str | None = None      # `Parent: <key>` (mission-tree aggregation)
+        self.required = False               # `Required: true` (parent needs this child)
+        self.body_signal = "quest_completed"  # completion-body route: _completed / _failed
+        self.protect_name: str | None = None  # friendly protect target -> "Protect <name>"
         self.critical = False
         self.fail_on_all_dead: str | None = None
         self.win: str | bool | None = None   # prose reason, True (bare flag), or None
@@ -80,6 +84,10 @@ class Quest:
             out.append(f"Complete after: {self.complete_after}")
         if self.reveal:
             out.append(f"Then: reveal {self.reveal}")
+        if self.parent:
+            out.append(f"Parent: {self.parent}")
+        if self.required:
+            out.append("Required: true")
         if self.critical:
             out.append("Critical: true")
         if self.fail_on_all_dead:
@@ -174,8 +182,10 @@ class AmdBuilder:
         self.roles: list[tuple[str, str]] = []      # (mast_var, role) to add_role in @map
         self.watchers: list[tuple[str, list[XmlNode]]] = []  # (gate_label, conditions)
         self.beats: list[Event] = []                # leftover events -> background loops
-        # (quest_key, [body XmlNodes]) -> a //signal/quest_completed route (reveal chain)
-        self.completion_bodies: list[tuple[str, list[XmlNode]]] = []
+        # (quest_key, [body XmlNodes], driver_signal) -> a //signal/<driver_signal> route
+        # carrying the event body (driver_signal is quest_completed, or quest_failed for a
+        # protect objective whose body is a penalty).
+        self.completion_bodies: list[tuple[str, list[XmlNode], str]] = []
         self._gate = 0
         # reveal graph: watcher labels deferred until their phase is reached, and the
         # phase routes that reveal+start them. Keyed by (flag, vkey) -> (vraw, [(q,label)]).
@@ -269,7 +279,7 @@ class AmdBuilder:
                         if not (n.tag == "set_timer" and n.get("name") == info["T"])
                         and not (n.tag == "set_variable" and n.get("name") == info["F"])]
                 if body:
-                    self.completion_bodies.append((keys[i], body))
+                    self.completion_bodies.append((keys[i], body, "quest_completed"))
                 self.quests.append(q)
                 prev_secs = info["set_timer_secs"] or prev_secs
             consumed |= {id(ev) for ev, _ in chain}
@@ -304,6 +314,7 @@ class AmdBuilder:
             q = self._objective_quest(ev, used_ids, terminal)
             (self.quests.append(q) if q is not None else self.beats.append(ev))
         self._wire_reveal_graph()  # defer phase-gated watchers until their phase is reached
+        self._aggregate_kills(used_ids)  # roll per-ship kills under one Parent quest
         # if nothing produced a real objective, still give the log a root quest
         if not any(q.goal or q.when or q.fail_on_all_dead for q in self.quests):
             root = Quest("main", "Mission")
@@ -347,6 +358,28 @@ class AmdBuilder:
             vraw2, items = self.phase_routes.setdefault(key, (vraw, []))
             items.append((q.key, q.gate_label))
 
+    def _aggregate_kills(self, used_ids: set) -> None:
+        """Roll the per-ship ``Goal: destroy 1 <role>`` objectives under one synthetic
+        Parent quest, so a fleet of individual kills reads as one mission objective in the
+        log (the parent completes when every child does). Only when there are >=3 -- fewer
+        isn't worth a parent. Left as a flat aggregate: which kills are optional, and
+        whether clearing the fleet WINS, are per-mission decisions (flagged as a TODO)."""
+        kills = [q for q in self.quests if q.goal and q.goal.startswith("destroy 1 ")]
+        if len(kills) < 3:
+            return
+        pkey = "hostile_fleet"
+        while pkey in used_ids:
+            pkey += "_x"
+        used_ids.add(pkey)
+        parent = Quest(pkey, "Destroy the hostile fleet")
+        parent.desc = "Destroy every hostile vessel."
+        parent.todos.append("auto-grouped kill objectives; mark `Win:` here if clearing "
+                            "the fleet wins the mission, and split out any optional targets.")
+        for q in kills:
+            q.parent = pkey
+            q.required = True
+        self.quests.insert(0, parent)
+
     # -- objective quests (flag-guarded trigger events) --------------------------------
     def _dropped_guards(self, ev: Event, terminal: set) -> list:
         """`if_variable` conditions to drop from an event's trigger: the end_mission
@@ -365,6 +398,16 @@ class AmdBuilder:
             if name in terminal or name in sets or latch:
                 out.append(c)
         return out
+
+    def _target_side(self, name: str | None) -> str | None:
+        """The Cosmos side ('enemy'/'friendly'/'neutral') of a named 2.8 object, from its
+        create node's sideValue; None if unknown."""
+        if not name:
+            return None
+        for n in self.mission.all_nodes():
+            if n.tag == "create" and n.get("name") == name:
+                return _SIDE.get((n.get("sideValue") or "").strip())
+        return None
 
     def _objective_text(self, ev: Event) -> str:
         """Objective/description prose lifted from the event's big_message or first comms
@@ -416,7 +459,7 @@ class AmdBuilder:
         q.desc = text or q.desc
         q.title = _quest_title(ev, q)
         if ev.commands:
-            self.completion_bodies.append((key, list(ev.commands)))
+            self.completion_bodies.append((key, list(ev.commands), q.body_signal))
         return q
 
     def _fill_objective(self, q: Quest, ev: Event, terminal: set) -> None:
@@ -437,9 +480,17 @@ class AmdBuilder:
             c = reals[0]
             if (c.tag == "if_not_exists" and not _is_player_ref(self.em, c)
                     and self.em.symbols.get(c.get("name") or "")):
-                role = _pyname(c.get("name")).lower()
-                q.goal = f"destroy 1 {role}"
-                self._add_role(self.em.symbols[c.get("name")], role)
+                name = c.get("name")
+                role = _pyname(name).lower()
+                self._add_role(self.em.symbols[name], role)
+                if self._target_side(name) in ("friendly", "neutral"):
+                    # destroying a friendly/neutral object is a LOSS/penalty, not a goal:
+                    # a PROTECT objective that FAILS when it dies (body on quest_failed).
+                    q.fail_on_all_dead = role
+                    q.body_signal = "quest_failed"
+                    q.protect_name = name
+                else:
+                    q.goal = f"destroy 1 {role}"
                 return
             if c.tag == "if_fleet_count" and c.get("fleetnumber"):
                 fl = c.get("fleetnumber")
@@ -486,6 +537,8 @@ def _beat_info(ev: Event) -> dict | None:
 def _quest_title(ev: Event, q: Quest) -> str:
     """A readable quest title. Prefer the 2.8 event name; if it is a generic
     ``event_N`` (2.8 left it unnamed), synthesize one from the objective/outcome."""
+    if q.protect_name:
+        return f"Protect {q.protect_name}"
     name = (ev.name or "").strip()
     if name and not _re.fullmatch(r"event_\d+", name):
         return name
@@ -659,10 +712,10 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
         L.append("    ->END")
         L.append("")
 
-    # reveal-chain beat bodies: run when the timed quest completes (the AMD
-    # `Complete after:` fires quest_completed; the body is the 2.8 beat's payload).
-    for key, body in builder.completion_bodies:
-        L.append(f'//signal/quest_completed if QUEST_ID == "{key}"   # timed beat body')
+    # event bodies: run when the quest resolves. quest_completed for objectives/beats;
+    # quest_failed for a protect objective (the body is the 2.8 penalty payload).
+    for key, body, sig in builder.completion_bodies:
+        L.append(f'//signal/{sig} if QUEST_ID == "{key}"   # event body')
         for n in body:
             L.append(f"    # {_xml_one(n)}")
             L.extend(em.emit_command(n))
