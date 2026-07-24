@@ -335,6 +335,10 @@ class Emitter:
         # sideValue as a property reuses the side-role reassignment (1=enemy / 2=friendly)
         if var is not None and prop in ("sideValue", "SideValue"):
             return [f"    a2x_set_side_value({var}, {_value(val)})"]
+        # elite/special ability bit-sum -> enable each named elite ability (LM fleets addon)
+        if var is not None and prop in ("eliteAbilityBits", "specialAbilityBits"):
+            self.addons.add("fleets")
+            return [f"    a2x_set_special_bits({var}, {_value(val)})"]
         if var is not None and prop in _AUTO_PROPS:
             return [f'    a2x_set_object_property({var}, "{prop}", {_value(val)})']
         self.note(f"set_object_property {prop}={val} on '{n.get('name','?')}': no "
