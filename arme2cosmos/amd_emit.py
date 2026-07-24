@@ -655,6 +655,13 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
 
     _prescan_named_objects(mission, em)
     em.addons.add("quests")  # LM quest_driver reads the granted AMD
+    em.emit_scan_roles = True  # tag scanned objects so amd_science scans render (scan_desc)
+    # prescan scan_desc up front so the science_define_scan call is emitted even when the
+    # set_ship_text lives in an event body (emitted after the grant line).
+    for nd in mission.all_nodes():
+        if (nd.tag == "set_ship_text" and nd.get("scan_desc") is not None
+                and em.symbols.get(nd.get("name"))):
+            em.scans[nd.get("name")] = _mast_str(nd.get("scan_desc"))
 
     # Partition comms/GM-button events out to //comms routes (reuse the MAST-target
     # builders) -- exactly as convert.build_story_mast does. Only the remaining "plain"
@@ -697,7 +704,7 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
               "- Review each quest's Goal/Win/Lose and the synthesized objective prose; "
               "see docs/amd_target.md.\n")
 
-    return {
+    files = {
         "story.amd": story_amd,
         "story.mast": story_mast,
         "script.py": build_script_py(mission),
@@ -706,6 +713,29 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
         "MIGRATION_NOTES.md": notes,
         "__lib__.json": '{"version": "' + lib_version + '"}\n',
     }
+    # 2.8 scan_desc recovered as declarative science scans (loaded by story.mast).
+    if em.scans:
+        files["scans.amd"] = _build_scans_amd(em.scans)
+    return files
+
+
+def _build_scans_amd(scans: dict) -> str:
+    """One AMD science-scan section per object: `Scan of: scan_<name>` + the 2.8 scan_desc
+    as the scan body. The object is tagged with the matching `scan_<name>` role in
+    story.mast (see c_set_ship_text); the LM science_scans addon renders it on scan."""
+    out = ["# 2.8 set_ship_text scan_desc -> declarative science scans (amd_science).",
+           "# Loaded by story.mast via science_define_scan_amd; the scanned objects are",
+           "# tagged with their scan_<name> role there.", ""]
+    for name, text in scans.items():
+        role = "scan_" + _pyname(name).lower()
+        out.append(f"# [{_amd_text(name)}]({role}_def)")
+        out.append("---")
+        out.append(f"Scan of: {role}")
+        out.append("Tab: scan")
+        out.append("---")
+        out.append(f"% {_amd_text(text)}")
+        out.append("")
+    return "\n".join(out) + "\n"
 
 
 def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
@@ -753,6 +783,11 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     L.append("    # --- grant the AMD quest tree (LM quest_driver takes over win/lose) ---")
     L.append('    quest_grant_amd(SHARED, document_get_amd_file('
              'get_mission_dir_filename("story.amd"), data_parser=amd_quest_data))')
+    if em.scans:
+        em.addons.add("science_scans")  # LM addon: renders science_define_scan content
+        L.append("    # 2.8 set_ship_text scan_desc -> declarative science scans")
+        L.append('    science_define_scan_amd(document_get_amd_file('
+                 'get_mission_dir_filename("scans.amd"), data_parser=amd_scan_data))')
     L.append("")
 
     active_watchers = [gl for gl, _c in builder.watchers if gl not in builder.deferred_gates]

@@ -38,7 +38,7 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `set_player_grid_damage` | **DONE** | `grid_damage_system(ship, sbs.SHPSYS.*)` |
 | `set_object_property` | **PARTIAL** | mapped props -> real `data_set`/`engine`/`pos`/fleet calls; VERIFY/HUMAN props -> `# TODO` (see property_map) |
 | `addto_object_property` / `copy_object_property` | **PARTIAL** | same, for mapped props |
-| `set_ship_text` | **DONE** | name/race/class/desc -> `name_tag`/`hull_origin`/`hull_name`/`long_description` (scan_desc/hail dropped) |
+| `set_ship_text` | **DONE** | name/race/class/desc -> `name_tag`/`hull_origin`/`hull_name`/`long_description`. **`scan_desc` recovered** (AMD target): emitted as a declarative `amd_science` scan in `scans.amd`, the object tagged with a `scan_<name>` role, loaded via `science_define_scan_amd` + the `science_scans` addon. `hailtext` still dropped (comms hail -- needs `amd_dialogue`) |
 | `set_relative_position` | **DONE** | `a2x_set_relative_position` (XZ; heading-relative nuance is a refinement) |
 | `set_side_value` | **DONE** | `a2x_set_side_value` (swaps the side role) |
 | `set_special` (ability) | **DONE** | all 14 abilities -> LM elite system (engine flags + scripted `elite/*` roles via `handle_elite_abilities`); no-name calls target `COMMS_SELECTED_ID` |

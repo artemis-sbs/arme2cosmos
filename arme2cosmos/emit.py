@@ -78,6 +78,11 @@ class Emitter:
         # AMD reveal graph: (flag_name, numeric-value-key) pairs whose set_variable should
         # also emit a phase signal (populated by the AMD target's reveal-graph pass).
         self.phase_signals: set[tuple[str, str]] = set()
+        # 2.8 set_ship_text scan_desc recovered as declarative science scans: object name
+        # -> scan text (the AMD target emits these as amd_science + tags a scan_<name> role).
+        self.scans: dict[str, str] = {}
+        self.emit_scan_roles = False  # AMD target: tag scanned objects with their scan role
+        self.scan_roles_done: set[str] = set()  # objects already given their scan_ role tag
 
     def _art(self, n: XmlNode, default: str) -> str:
         """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),
@@ -421,15 +426,26 @@ class Emitter:
         var = self.symbols.get(n.get("name"))
         if var is None:
             return [f"    # TODO set_ship_text: {_xml_repr(n)}"]
-        kw = {"newname": "name", "race": "race", "class": "ship_class",
-              "desc": "desc", "scan_desc": "scan_desc", "hailtext": "hail"}
+        kw = {"newname": "name", "race": "race", "class": "ship_class", "desc": "desc"}
         args = [f'{kw[a]}="{_mast_str(n.get(a))}"' for a in kw if n.get(a) is not None]
-        if not args:
-            return [f"    # set_ship_text (no mappable fields): {_xml_repr(n)}"]
-        if any(n.get(a) is not None for a in ("scan_desc", "hailtext")):
-            self.note("set_ship_text scan_desc/hailtext have no data_set key "
-                      "(handle via science scan / comms hail)")
-        return [f'    a2x_set_ship_text({var}, {", ".join(args)})']
+        out: list[str] = []
+        # scan_desc -> a declarative science scan (2.8 lost it: a2x_set_ship_text has no
+        # key for it). The AMD target renders it via amd_science; tag the object here (where
+        # it is known to exist) with its scan role, and record the text for scans.amd.
+        if n.get("scan_desc") is not None:
+            name = n.get("name")
+            self.scans[name] = _mast_str(n.get("scan_desc"))
+            if self.emit_scan_roles and name not in self.scan_roles_done:
+                self.scan_roles_done.add(name)
+                out.append(f'    add_role({var}, "scan_{_pyname(name).lower()}")')
+        if n.get("hailtext") is not None:
+            self.note("set_ship_text hailtext: 2.8 comms hail has no auto-map "
+                      "(author a //comms hail or amd_dialogue)")
+        if args:
+            out.append(f'    a2x_set_ship_text({var}, {", ".join(args)})')
+        elif not out:
+            out.append(f"    # set_ship_text (no mappable fields): {_xml_repr(n)}")
+        return out
 
     def c_set_special(self, n: XmlNode) -> list[str]:
         # the ship: a captured named object, a player_slot, or (GM-button handlers
