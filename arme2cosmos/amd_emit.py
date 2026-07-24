@@ -698,9 +698,11 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     # prescan scan_desc up front so the science_define_scan call is emitted even when the
     # set_ship_text lives in an event body (emitted after the grant line).
     for nd in mission.all_nodes():
-        if (nd.tag == "set_ship_text" and nd.get("scan_desc") is not None
-                and em.symbols.get(nd.get("name"))):
-            em.scans[nd.get("name")] = _mast_str(nd.get("scan_desc"))
+        if nd.tag == "set_ship_text" and em.symbols.get(nd.get("name")):
+            if nd.get("scan_desc") is not None:
+                em.scans[nd.get("name")] = _mast_str(nd.get("scan_desc"))
+            if nd.get("hailtext") is not None:
+                em.hails[nd.get("name")] = _mast_str(nd.get("hailtext"))
 
     # Partition comms/GM-button events out to //comms routes (reuse the MAST-target
     # builders) -- exactly as convert.build_story_mast does. Only the remaining "plain"
@@ -730,6 +732,20 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
         comment="# 2.8 comms buttons -> a //comms route (refine the gating/selection).",
         addons=["comms"])
     routes += build_gm_tree_routes(mission, em, gm_btn_events)
+    # 2.8 set_ship_text hailtext -> one gated Hail comms button showing the ship's stored
+    # hail line (set as an a2x_hail inventory value where set_ship_text ran).
+    if em.hails:
+        em.addons.add("comms")
+        routes += [
+            "",
+            "# 2.8 set_ship_text hailtext -> a Hail comms button (per-ship stored hail).",
+            "# NOTE: enemies may also show the LM race-taunt Hail; refine the gating if so.",
+            '//comms if is_space_object_id(COMMS_SELECTED_ID) and '
+            'get_inventory_value(COMMS_SELECTED_ID, "a2x_hail", "") != ""',
+            '    + "Hail":',
+            '        comms_receive(get_inventory_value(COMMS_SELECTED_ID, "a2x_hail", ""), '
+            'title="Hail")',
+        ]
     if routes:
         story_mast += "\n".join(routes) + "\n"
 

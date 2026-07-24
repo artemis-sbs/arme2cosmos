@@ -83,6 +83,10 @@ class Emitter:
         self.scans: dict[str, str] = {}
         self.emit_scan_roles = False  # AMD target: tag scanned objects with their scan role
         self.scan_roles_done: set[str] = set()  # objects already given their scan_ role tag
+        # 2.8 set_ship_text hailtext recovered as a Hail comms button: object name -> hail
+        # text (the AMD target stores it as an inventory value + a gated //comms Hail route).
+        self.hails: dict[str, str] = {}
+        self.hail_done: set[str] = set()  # objects already given their stored hail value
 
     def _art(self, n: XmlNode, default: str) -> str:
         """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),
@@ -438,9 +442,15 @@ class Emitter:
             if self.emit_scan_roles and name not in self.scan_roles_done:
                 self.scan_roles_done.add(name)
                 out.append(f'    add_role({var}, "scan_{_pyname(name).lower()}")')
+        # hailtext -> a Hail comms button (2.8 lost it). Store the line on the ship; the
+        # AMD target adds one gated //comms Hail route that shows it (see build_amd_target).
         if n.get("hailtext") is not None:
-            self.note("set_ship_text hailtext: 2.8 comms hail has no auto-map "
-                      "(author a //comms hail or amd_dialogue)")
+            name = n.get("name")
+            self.hails[name] = _mast_str(n.get("hailtext"))
+            if self.emit_scan_roles and name not in self.hail_done:
+                self.hail_done.add(name)
+                out.append(f'    set_inventory_value({var}, "a2x_hail", '
+                           f'"{_mast_str(n.get("hailtext"))}")')
         if args:
             out.append(f'    a2x_set_ship_text({var}, {", ".join(args)})')
         elif not out:
