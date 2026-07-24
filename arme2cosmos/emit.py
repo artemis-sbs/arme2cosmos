@@ -242,6 +242,7 @@ class Emitter:
         self.addons.add("comms")
         frm = _mast_str(n.get("from", ""))
         body = _mast_str(n.text or "")  # ^ line-breaks preserved; a2x_clean converts them
+        # 2.8 `from` is just the sender label (the comms title), not an object reference.
         return [f'    a2x_incoming_comms_text("{body}", from_name="{frm}")']
 
     def c_add_ai(self, n: XmlNode) -> list[str]:
@@ -639,6 +640,11 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0) -> list[str]:
         return [f'    # guard: {_pyname(n.get("name"))} {n.get("comparator","")} {n.get("value","")}']
     if tag == "if_timer_finished":
         return [f'    await is_timer_finished(0, "{n.get("name")}")']
+    if tag == "if_object_property":
+        b = _cond_bool(em, n)  # mapped props -> a live boolean; poll until it holds
+        if b:
+            return [f"---wait_prop_{idx}", "    await delay_sim(0.5)",
+                    f"    jump wait_prop_{idx} if not ({b})"]
     return [f"    # when: {_xml_repr(n)}"]
 
 
@@ -691,4 +697,16 @@ def _cond_bool(em: Emitter, n: XmlNode) -> str | None:
         inside = "True" if tag == "if_inside_box" else "False"
         return (f'a2x_in_box({o}, {n.get("leastX","0")}, {n.get("leastZ","0")}, '
                 f'{n.get("mostX","0")}, {n.get("mostZ","0")}, inside={inside})')
+    if tag == "if_object_property":
+        # Read a mapped 2.8 property live (a2x_object_property mirrors the a2x setter
+        # table). Only the confirmed props (_AUTO_PROPS) become a live boolean; the rest
+        # stay unexpressible (-> verify-by-hand comment / not an AMD escape-hatch trigger).
+        prop = n.get("property")
+        if prop in _AUTO_PROPS:
+            o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
+            op = _CMP_OP.get((n.get("comparator", "") or "").strip().upper(), "==")
+            # `or 0` guards a gone object (a2x_object_property -> None) so the compare
+            # never throws in a polling loop.
+            return f'(a2x_object_property({o}, "{prop}") or 0) {op} {_value(n.get("value", "0"))}'
+        return None
     return None

@@ -69,7 +69,8 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `if_difficulty` | **DONE** | live `DIFFICULTY <op> v` boolean (in polling loops) |
 | `if_monster_tag_matches` / `if_object_tag_matches` | **PARTIAL** | inventory guard (tagging gameplay TODO) |
 | `if_comms_button` / `if_gm_button` | **DONE** | handled structurally (become route buttons) |
-| `if_object_property` / `if_scan_level` / `if_in_nebula` / `if_damcon_members` / `if_player_is_targeting` | TODO | emitted as a `# when (verify by hand)` comment |
+| `if_object_property` | **PARTIAL** | mapped props (`_AUTO_PROPS`) -> live `a2x_object_property(obj, prop) <op> val` boolean (loops + one-shot poll); unmapped props stay a `# when (verify by hand)` comment. Corpus: ~48% of occurrences now evaluate for real |
+| `if_scan_level` / `if_in_nebula` / `if_damcon_members` / `if_player_is_targeting` | TODO | emitted as a `# when (verify by hand)` comment |
 | `if_gm_key` / `if_client_key` | TODO | key handlers |
 
 ---

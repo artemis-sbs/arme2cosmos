@@ -59,7 +59,8 @@ def _cmd_convert(args: argparse.Namespace) -> int:
             hullmap = json.load(hf)
     for f in files:
         try:
-            out = convert_file(f, args.out, args.lib_version, hullmap, args.event_model)
+            out = convert_file(f, args.out, args.lib_version, hullmap,
+                               args.event_model, args.target)
         except Exception as exc:  # noqa: BLE001
             print(f"!! failed to convert {f}: {exc}", file=sys.stderr)
             continue
@@ -112,6 +113,10 @@ def build_parser() -> argparse.ArgumentParser:
                       help="sbslib/mastlib version tag for story.json (default: v1.4.0)")
     conv.add_argument("--hullmap", default=None,
                       help="hullmap.json (from `artmap`) to resolve real ship art")
+    conv.add_argument("--target", choices=["mast", "amd"], default="mast",
+                      help="mast (default): MAST-only scaffold (see --event-model); "
+                           "amd: an AMD quest tree (story.amd) + a thin story.mast "
+                           "(see docs/amd_target.md)")
     conv.add_argument("--event-model", choices=["hybrid", "linear", "a28_compatible"],
                       default="hybrid",
                       help="hybrid (default): flag-chained scenes stay linear, "

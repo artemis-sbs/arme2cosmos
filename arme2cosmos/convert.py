@@ -476,7 +476,7 @@ def build_description_yaml(mission: Mission) -> str:
     desc = mission.description.replace("^", " ").replace("\n", " ").strip()
     # 2.8 has no keyword/category metadata; tag the port so it is findable in the list.
     return (f"format version: 1\n"
-            f"Category: Standard\n"
+            f"Category: migrated 2.x\n"
             f"Category Priority: C\n"
             f"Visible Mission Name: {_yaml_scalar(disp)}\n"
             f"Description: {_yaml_scalar(desc)}\n"
@@ -528,20 +528,30 @@ def build_notes(mission: Mission, em: Emitter) -> str:
 
 
 def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSION,
-                 hullmap: dict | None = None, event_model: str = "hybrid") -> str:
-    """Convert one mission XML; write a scaffold dir under out_root. Returns the dir."""
+                 hullmap: dict | None = None, event_model: str = "hybrid",
+                 target: str = "mast") -> str:
+    """Convert one mission XML; write a scaffold dir under out_root. Returns the dir.
+
+    ``target='mast'`` (default) emits the MAST-only scaffold controlled by
+    ``event_model``. ``target='amd'`` emits an AMD quest tree (story.amd) plus a thin
+    story.mast instead -- see ``docs/amd_target.md``.
+    """
     mission = parse_file(path)
     em = Emitter(mission, hullmap=hullmap)
 
-    story = build_story_mast(mission, em, event_model)  # populates em.addons/notes
-    files = {
-        "story.mast": story,
-        "script.py": build_script_py(mission),
-        "story.json": build_story_json(em, lib_version),
-        "description.yaml": build_description_yaml(mission),
-        "MIGRATION_NOTES.md": build_notes(mission, em),
-        "__lib__.json": '{"version": "' + lib_version + '"}\n',
-    }
+    if target == "amd":
+        from .amd_emit import build_amd_target
+        files = build_amd_target(mission, em, lib_version)
+    else:
+        story = build_story_mast(mission, em, event_model)  # populates em.addons/notes
+        files = {
+            "story.mast": story,
+            "script.py": build_script_py(mission),
+            "story.json": build_story_json(em, lib_version),
+            "description.yaml": build_description_yaml(mission),
+            "MIGRATION_NOTES.md": build_notes(mission, em),
+            "__lib__.json": '{"version": "' + lib_version + '"}\n',
+        }
 
     out_dir = os.path.join(out_root, _slug(mission.name))
     os.makedirs(out_dir, exist_ok=True)
