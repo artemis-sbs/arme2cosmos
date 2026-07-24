@@ -106,6 +106,16 @@ class Quest:
         return "\n".join(out)
 
 
+def _join_names(names: list) -> str:
+    """['A'] -> 'A'; ['A','B'] -> 'A and B'; ['A','B','C'] -> 'A, B and C'."""
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return names[0] if names else ""
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
 def _amd_text(s: str) -> str:
     """One-line, ASCII-safe text for an AMD heading/value (engine text is ASCII-only)."""
     s = (s or "").replace("^", " ").replace("\r", " ").replace("\n", " ")
@@ -452,41 +462,67 @@ class AmdBuilder:
                 return _amd_text(n.text[:140])
         return ""
 
-    def _native_goal_kind(self, ev: Event, terminal: set) -> str | None:
-        """'kill' / 'player' if this event's trigger is a concrete destroy/survive goal,
-        else None. Mirrors the native branch of :meth:`_fill_objective`."""
+    def _killable(self, c: XmlNode) -> str | None:
+        """The captured non-player, non-sentinel object an ``if_not_exists`` targets, else
+        None. 2.8 uses ``if_not_exists name="."`` / ``".."`` as an always-true guard (no
+        object has that name), so a pure-punctuation name is not a kill target."""
+        name = c.get("name")
+        if c.tag != "if_not_exists" or _is_player_ref(self.em, c) or not name:
+            return None
+        if not any(ch.isalnum() for ch in name):
+            return None  # "." / ".." sentinel (2.8 always-true idiom)
+        return name if self.em.symbols.get(name) else None
+
+    def _kill_target_names(self, ev: Event, terminal: set) -> list:
+        """Captured non-player objects whose destruction this event tests (if_not_exists)."""
         conds = [c for c in ev.conditions if c not in self._dropped_guards(ev, terminal)]
-        reals = [c for c in conds if c.tag in _REAL_TRIGGER_TAGS]
-        kept_flags = [c for c in conds if c.tag == "if_variable"]
-        if (len(conds) == 1 and reals and reals[0].tag == "if_not_exists"
-                and _is_player_ref(self.em, reals[0])):
+        return [self._killable(c) for c in conds if self._killable(c)]
+
+    def _objective_kind(self, ev: Event, terminal: set) -> str | None:
+        """The player-facing objective kind of this event, or None (mechanism / glue):
+        'player' (own death), 'kill'/'protect' (a captured object's destruction -- any
+        count, phase-gated ok), 'reach' (player approaches an object), or 'dock'. A bare
+        property/exists/timed trigger is NOT an objective unless the event is narrated."""
+        conds = [c for c in ev.conditions if c not in self._dropped_guards(ev, terminal)]
+        if any(c.tag == "if_not_exists" and _is_player_ref(self.em, c) for c in conds):
             return "player"
-        if not kept_flags and len(reals) == 1:
-            c = reals[0]
-            if (c.tag == "if_not_exists" and not _is_player_ref(self.em, c)
-                    and self.em.symbols.get(c.get("name") or "")):
-                return "kill"
+        for c in conds:
+            if self._killable(c):
+                return "protect" if self._target_side(c.get("name")) in ("friendly", "neutral") else "kill"
             if c.tag == "if_fleet_count" and c.get("fleetnumber"):
                 return "kill"
+        if self._reach_trigger(conds) is not None:
+            return "reach"
+        if any(c.tag == "if_docked" for c in conds):
+            return "dock"
         return None
 
     def _objective_quest(self, ev: Event, used_ids: set, terminal: set):
         """An event -> an objective quest, or None (stays a background loop).
 
-        Promoted only if it is a genuine objective: a concrete kill/survive goal, or a
-        NARRATED event (carries big_message / comms text). A bare mechanism event -- a
-        trigger with no player-facing text and no kill goal (beacon toggles, score
-        bookkeeping) -- is not an objective and stays a loop."""
+        Promoted if it is a genuine objective -- a kill / protect / reach / dock / survive
+        goal (see :meth:`_objective_kind`), OR a NARRATED event (big_message / comms). A
+        bare mechanism event (a property/exists/timed trigger with no player-facing text
+        and no objective kind -- spawn triggers, score bookkeeping) stays a loop."""
         if not any(c.tag in _REAL_TRIGGER_TAGS for c in ev.conditions):
             return None
         text = self._objective_text(ev)
-        if not text and self._native_goal_kind(ev, terminal) is None:
+        kind = self._objective_kind(ev, terminal)
+        if not text and kind is None:
             return None
         key = _quest_key(ev, used_ids)
         q = Quest(key, ev.name or key)
         self._fill_objective(q, ev, terminal)
         q.desc = text or q.desc
-        q.title = _quest_title(ev, q)
+        # an un-narrated multi/gated KILL that didn't get a native Goal (watcher form) --
+        # synthesize a readable "Destroy A and B" title from the targets instead of the
+        # (often mechanism-flavored) 2.8 event name.
+        names = self._kill_target_names(ev, terminal) if (not text and kind == "kill" and not q.goal) else []
+        if names:
+            q.title = "Destroy " + _amd_text(_join_names(names))
+            q.desc = q.desc or (q.title + ".")
+        else:
+            q.title = _quest_title(ev, q)
         if ev.commands:
             self.completion_bodies.append((key, list(ev.commands), q.body_signal))
         return q
@@ -507,8 +543,7 @@ class AmdBuilder:
         # native kill goal when nothing else gates it (target existence IS the gate)
         if not kept_flags and len(reals) == 1:
             c = reals[0]
-            if (c.tag == "if_not_exists" and not _is_player_ref(self.em, c)
-                    and self.em.symbols.get(c.get("name") or "")):
+            if self._killable(c):
                 name = c.get("name")
                 role = _pyname(name).lower()
                 self._add_role(self.em.symbols[name], role)

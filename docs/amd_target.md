@@ -206,7 +206,15 @@ text) — to a quest:
 - Bare **mechanism** events (a trigger but no player text and no kill goal — beacon
   toggles, score bookkeeping) are **not** objectives and stay background loops.
 
-Corpus effect: quests **150 → 1372**, beats **3324 → 2082**, all 27 still compile.
+**What counts as an objective** (`_objective_kind`) is broader than a narrated event: a
+**kill** (any `if_not_exists` on a captured enemy — multi-condition and phase-gated
+included, e.g. "destroy A *and* B"), a **protect** (friendly `if_not_exists`), a
+**reach** (player approaches an object), or a **dock**. These promote even without comms
+text, and an un-narrated multi-kill gets a synthesized `Destroy A and B` title from its
+targets. 2.8's always-true `if_not_exists name="."` / `".."` sentinels are filtered out
+(they name no real object), so they never become a spurious `Destroy .` goal.
+
+Corpus effect: quests **150 → 1743**, beats **3324 → 1705**, all 27 still compile.
 
 **Reveal graph (implemented).** A watcher-backed objective gated on exactly one
 `F == v` becomes `State: secret` when a *later* event (not `<start>`) sets `F = v`: its
