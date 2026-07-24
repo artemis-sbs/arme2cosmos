@@ -45,7 +45,7 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `roll` (24) | quat | orientation quaternion | VERIFY | same as `angle` |
 | `topSpeed` (564) | data_set | `speed_coeff` (0-1) | **DONE** | PROVEN behaviorally vs the mock engine physics: NPC cruise = throttle x 36 u/s x speed_coeff (1.0/0.5/0.25 -> 36/18/9). 2.8 topSpeed values are already 0-1 coeffs (1:1). **NPC-only** -- Cosmos player top speed is fixed (playerThrottle x 180, no speed_coeff), so on a player it's a harmless no-op (0 corpus sites use player_slot) |
 | `currentRealSpeed` (26) | obj | `cur_speed` (space_object attr) | **DONE** | read side: physics-driven current speed; setting is overwritten each tick (effectively read-only) |
-| `pushRadius` (269) | obj | `exclusion_radius` (collision radius) | VERIFY | 2.8 push radius = the object's **exclusion / collision radius** (mock backing `_exclusion_radius`, from shipData `exclusionradius`) -- wire the exact space_object attr |
+| `pushRadius` (269) | obj | `exclusion_radius` (space_object property) | **DONE** | 2.8 push radius = the object's exclusion / collision radius |
 | `deltaX` (2) | — | velocity; no data_set key | HUMAN | drop? |
 | `blocksShotFlag` (67) | — | no equivalent | HUMAN | |
 | `triggersMines` (22) | — | no equivalent | HUMAN | |
@@ -78,12 +78,12 @@ LM torpedo types (`PShock_NUM`, `Tag_NUM`), and ECM ~ EMP.
 | `countHoming` (37) | data_set | `Homing_NUM` | **DONE** | |
 | `countMine` (9) | data_set | `Mine_NUM` | **DONE** | |
 | `countEMP` (17) | data_set | `EMP_NUM` | **DONE** | |
-| `missileStoresPShock` (79) | data_set | `PShock_NUM` | VERIFY | plasma-shock is an LM torpedo type now (`PShock_NUM` exists) -- ready to wire |
-| `missileStoresECM` (6) | data_set | `EMP_NUM` | VERIFY | ECM ~ EMP (per author) |
-| `missileStoresTag` (1) | data_set | `Tag_NUM` | VERIFY | tag is an LM torpedo type now (`Tag_NUM` exists) -- ready to wire |
+| `missileStoresPShock` (79) | data_set | `PShock_NUM` | **DONE** | LM plasma-shock torpedo type |
+| `missileStoresECM` (6) | data_set | `EMP_NUM` | **DONE** | ECM ~ EMP |
+| `missileStoresTag` (1) | data_set | `Tag_NUM` | **DONE** | LM tag torpedo type |
 | `missileStoresProbe` (1) | — | no key | HUMAN | |
 | `missileStoresBeacon` (1) | — | no key | HUMAN | |
-| `countShk` (4) | data_set | `PShock_NUM` | VERIFY | "Shk" = plasma shock -> `PShock_NUM` |
+| `countShk` (4) | data_set | `PShock_NUM` | **DONE** | Shk = plasma shock |
 
 ## Ship systems (heat / energy / damage)
 
@@ -110,8 +110,7 @@ overpower/coolant).
 | `systemDamageImpulse` (13) | data_set | `system_damage` [idx] | VERIFY | impulse system |
 | `systemDamageTurning` (6) | data_set | `system_damage` [idx] | VERIFY | turning / maneuver system |
 | `warpState` (58) | data_set | `warp_drive_active` (flag) | VERIFY | 2.8 had a level; Cosmos has 0/1 |
-| `systemCurEnergyFrontShield` (32) | — | no per-system energy key | HUMAN | |
-| `systemCurEnergyBackShield` (32) | — | no key | HUMAN | |
+| `systemCurEnergy*` (8 systems, ~32 ea) | data_set | `eng_control_value` [per control] | VERIFY | the **engineering power slider** per system (2.8 % -> Cosmos 0..3 = 0..300%); index via `eng_control_type_index` / the 8->4 SHPSYS collapse above |
 
 ## Enemy AI / elite
 
@@ -127,7 +126,7 @@ overpower/coolant).
 
 | 2.8 property | Target | Cosmos | Status | Notes |
 |---|---|---|---|---|
-| `sideValue` (272) + `SideValue` (12) | role | re-assign Cosmos side/role | VERIFY | YES -- wire `set_object_property sideValue` to reuse `a2x_set_side_value` (1=enemy / 2=friendly), which the `set_side_value` command already does |
+| `sideValue` (272) + `SideValue` (12) | role | `a2x_set_side_value` (1=enemy / 2=friendly) | **DONE** | property reuses the `set_side_value` side-role reassignment |
 | `pirateRepWithStations` (72) | — | no key | HUMAN | |
 | `canBuild` (4) | — | no key | HUMAN | |
 

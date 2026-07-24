@@ -42,6 +42,8 @@ _AUTO_PROPS = {
     "shieldMaxStateFront", "shieldMaxStateBack", "missileStoresNuke",
     "missileStoresHoming", "missileStoresMine", "missileStoresEMP", "countNuke",
     "countHoming", "countMine", "countEMP",
+    "missileStoresPShock", "missileStoresTag", "missileStoresECM", "countShk",
+    "pushRadius",
 }
 
 # Tiny starter hull/art crosswalk. The real table is the tool's `artmap`
@@ -330,6 +332,9 @@ class Emitter:
         # global difficulty knobs (no object name): nonPlayer*/player* -> fleet coeffs
         if n.get("name") is None and prop in _FLEET_COEFF:
             return [f'    a2x_set_fleet_coeff("{prop}", {_value(val)})']
+        # sideValue as a property reuses the side-role reassignment (1=enemy / 2=friendly)
+        if var is not None and prop in ("sideValue", "SideValue"):
+            return [f"    a2x_set_side_value({var}, {_value(val)})"]
         if var is not None and prop in _AUTO_PROPS:
             return [f'    a2x_set_object_property({var}, "{prop}", {_value(val)})']
         self.note(f"set_object_property {prop}={val} on '{n.get('name','?')}': no "
