@@ -45,7 +45,7 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `roll` (24) | quat | orientation quaternion | VERIFY | same as `angle` |
 | `topSpeed` (564) | data_set | `speed_coeff` (0-1) | **DONE** | PROVEN behaviorally vs the mock engine physics: NPC cruise = throttle x 36 u/s x speed_coeff (1.0/0.5/0.25 -> 36/18/9). 2.8 topSpeed values are already 0-1 coeffs (1:1). **NPC-only** -- Cosmos player top speed is fixed (playerThrottle x 180, no speed_coeff), so on a player it's a harmless no-op (0 corpus sites use player_slot) |
 | `currentRealSpeed` (26) | obj | `cur_speed` (space_object attr) | **DONE** | read side: physics-driven current speed; setting is overwritten each tick (effectively read-only) |
-| `pushRadius` (269) | — | no key found (`exclusion_radius`?) | HUMAN | |
+| `pushRadius` (269) | obj | `exclusion_radius` (collision radius) | VERIFY | 2.8 push radius = the object's **exclusion / collision radius** (mock backing `_exclusion_radius`, from shipData `exclusionradius`) -- wire the exact space_object attr |
 | `deltaX` (2) | — | velocity; no data_set key | HUMAN | drop? |
 | `blocksShotFlag` (67) | — | no equivalent | HUMAN | |
 | `triggersMines` (22) | — | no equivalent | HUMAN | |
@@ -63,6 +63,11 @@ Counts in parentheses = occurrences across the a28 corpus.
 
 ## Weapon stores & ammo
 
+`missileStores*` on a **station** = how many of each torpedo type the station has to
+**build/hand out** (the per-type `<Type>_NUM` build counts); on a ship it's the ship's
+ammo of that type. Same `<Type>_NUM` keys either way. PShock and Tag are now first-class
+LM torpedo types (`PShock_NUM`, `Tag_NUM`), and ECM ~ EMP.
+
 | 2.8 property | Target | Cosmos | Status | Notes |
 |---|---|---|---|---|
 | `missileStoresNuke` | data_set | `Nuke_NUM` | **DONE** | |
@@ -73,12 +78,12 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `countHoming` (37) | data_set | `Homing_NUM` | **DONE** | |
 | `countMine` (9) | data_set | `Mine_NUM` | **DONE** | |
 | `countEMP` (17) | data_set | `EMP_NUM` | **DONE** | |
-| `missileStoresPShock` (79) | — | no `PShock_NUM` in doc | HUMAN | Cosmos key for plasma shock? |
-| `missileStoresECM` (6) | — | no key | HUMAN | |
-| `missileStoresTag` (1) | — | no key | HUMAN | |
+| `missileStoresPShock` (79) | data_set | `PShock_NUM` | VERIFY | plasma-shock is an LM torpedo type now (`PShock_NUM` exists) -- ready to wire |
+| `missileStoresECM` (6) | data_set | `EMP_NUM` | VERIFY | ECM ~ EMP (per author) |
+| `missileStoresTag` (1) | data_set | `Tag_NUM` | VERIFY | tag is an LM torpedo type now (`Tag_NUM` exists) -- ready to wire |
 | `missileStoresProbe` (1) | — | no key | HUMAN | |
 | `missileStoresBeacon` (1) | — | no key | HUMAN | |
-| `countShk` (4) | — | no key | HUMAN | |
+| `countShk` (4) | data_set | `PShock_NUM` | VERIFY | "Shk" = plasma shock -> `PShock_NUM` |
 
 ## Ship systems (heat / energy / damage)
 
@@ -89,8 +94,8 @@ smaller set (`eng_control_type_index` is 0-3). The 8->4 index mapping needs you.
 |---|---|---|---|---|
 | `energy` (49) | data_set | `energy` | **DONE** | |
 | `systemCurHeat*` (~41 ea) | data_set | `system_cur_heat` [idx] | VERIFY | need 2.8 system -> Cosmos index |
-| `systemDamageImpulse` (13) | data_set | `system_damage` [idx] | VERIFY | impulse index? |
-| `systemDamageTurning` (6) | data_set | `system_damage` [idx] | VERIFY | turning index? |
+| `systemDamageImpulse` (13) | data_set | `system_damage` [idx] | VERIFY | impulse system |
+| `systemDamageTurning` (6) | data_set | `system_damage` [idx] | VERIFY | turning / maneuver system |
 | `warpState` (58) | data_set | `warp_drive_active` (flag) | VERIFY | 2.8 had a level; Cosmos has 0/1 |
 | `systemCurEnergyFrontShield` (32) | — | no per-system energy key | HUMAN | |
 | `systemCurEnergyBackShield` (32) | — | no key | HUMAN | |
@@ -100,16 +105,16 @@ smaller set (`eng_control_type_index` is 0-3). The 8->4 index mapping needs you.
 | 2.8 property | Target | Cosmos | Status | Notes |
 |---|---|---|---|---|
 | `hasSurrendered` (328) | data_set | `surrender_flag` | **DONE** | 0 = not surrendered |
-| `eliteAbilityBits` (40) | data_set | decompose -> `elite_*` flags | VERIFY | confirm bit->flag mapping |
-| `surrenderChance` (52) | — | no key | HUMAN | |
+| `eliteAbilityBits` (40) | data_set | decompose -> `elite_*` flags | VERIFY | bit->flag decomposition confirmed by author; wire the bit-split |
+| `surrenderChance` (52) | — | script-side calc | HUMAN | it's a calculation in Cosmos script, not a data key |
 | `tauntImmunityIndex` (24) | — | no key | HUMAN | |
-| `age` (19) | — | monster age; no key | HUMAN | size via `local_scale_coeff`? |
+| `age` (19) | — | LM monster age system | VERIFY | monsters have an age system now (LM prefabs: `monster_roll_age` / `monster_bake_age` + stage roles) -- map to that, not a raw key |
 
 ## Side / identity
 
 | 2.8 property | Target | Cosmos | Status | Notes |
 |---|---|---|---|---|
-| `sideValue` (272) + `SideValue` (12) | role | re-assign Cosmos side/role | VERIFY | map 1=enemy/2=friendly to roles? |
+| `sideValue` (272) + `SideValue` (12) | role | re-assign Cosmos side/role | VERIFY | YES -- wire `set_object_property sideValue` to reuse `a2x_set_side_value` (1=enemy / 2=friendly), which the `set_side_value` command already does |
 | `pirateRepWithStations` (72) | — | no key | HUMAN | |
 | `canBuild` (4) | — | no key | HUMAN | |
 
@@ -127,8 +132,8 @@ spawns if needed.
 | `nonPlayerWeapon` (25) | data_set | `all_beam_upgrade_coeff` + `all_tube_upgrade_coeff` on all NPCs | **DONE** | |
 | `playerShields` (25) | data_set | `all_shield_upgrade_coeff` on all players | **DONE** | |
 | `playerWeapon` (25) | data_set | `all_beam_upgrade_coeff` on all players | **DONE** | |
-| `musicObjectMasterVolume` (299) | setting | Cosmos music-volume API | VERIFY | which call? |
-| `nebulaIsOpaque` (30) | setting | global nebula setting | HUMAN | |
+| `musicObjectMasterVolume` (299) | setting | Cosmos music-volume API | VERIFY | no equiv add a stub |
+| `nebulaIsOpaque` (30) | setting | global nebula setting | HUMAN |  |
 | `sensorSetting` (38) | setting | global sensor setting | HUMAN | |
 
 ---
@@ -141,7 +146,7 @@ Beyond `set_object_property`, these 2.8 commands are also wired:
 |---|---|---|
 | `addto_object_property` | **DONE** | `a2x_addto_object_property` (read-modify a mapped prop) |
 | `copy_object_property` | **DONE** | `a2x_copy_object_property` (copy a mapped prop A->B) |
-| `set_ship_text` | **DONE** | `a2x_set_ship_text` (name->`name_tag`, race->`hull_origin`, class->`hull_name`, desc->`long_description`; scan_desc/hail have no key) |
+| `set_ship_text` | **DONE** | `a2x_set_ship_text` (name->`name_tag`, race->`hull_origin`, class->`hull_name`, desc->`long_description`). `scan_desc` -> a declarative `amd_science` scan (`scans.amd`); `hailtext` -> a stored `a2x_hail` + a `//comms` Hail button. Both recovered on all targets |
 | `set_relative_position` | **DONE** | `a2x_set_relative_position` (place near a reference, XZ; heading-relative nuance is a refinement) |
 | `set_special` (ability) | **DONE (partial)** | `a2x_set_special` -> `elite_*` flags for Stealth/LowVis/Drones/AntiMine/AntiTorp; combat abilities (Cloak/HET/Warp/Teleport/Tractor/ShldDrain/ShldVamp) have no key |
 | `set_special` (ship/captain) | HUMAN | 2.8 special ship/captain types have no Cosmos equivalent |
@@ -157,12 +162,14 @@ Beyond `set_object_property`, these 2.8 commands are also wired:
   `shieldMaxState{Front,Back}`, `missileStores{Nuke,Homing,Mine,EMP}`,
   `count{Nuke,Homing,Mine,EMP}` -- plus the `addto` / `copy` / `set_ship_text` /
   `set_relative_position` / `set_special` commands.
-- **VERIFY (need your confirm):** `angle`/`pitch`/`roll` heading writes,
-  `shieldState`, the `systemCurHeat*` / `systemDamage*` 8->4 index mapping, `warpState`,
-  `eliteAbilityBits` bit-decomposition, `sideValue`->roles, `musicObjectMasterVolume`.
-- **HUMAN (need a Cosmos key, or "drop"):** the rest -- `pushRadius`, `surrenderChance`,
-  `tauntImmunityIndex`, `pirateRepWithStations`, the plasma-shock/ECM/tag/probe/beacon
-  stores, `systemCurEnergy*`, the global difficulty coeffs, `nebulaIsOpaque`,
-  `sensorSetting`, etc.
+- **VERIFY (key known / confirmed -- ready to wire):** `pushRadius` (-> exclusion radius),
+  `missileStoresPShock`/`Tag`/`ECM` + `countShk` (-> the LM `PShock_NUM` / `Tag_NUM` /
+  `EMP_NUM` torpedo keys), `sideValue`->roles (reuse `a2x_set_side_value`),
+  `eliteAbilityBits` bit-decomposition, monster `age` (-> LM age system), `angle`/`pitch`/
+  `roll` heading writes, `shieldState`, the `systemCurHeat*` / `systemDamage*` 8->4 index
+  mapping, `warpState`, `musicObjectMasterVolume`.
+- **HUMAN (no Cosmos key, or "drop"):** `surrenderChance` (script-side calc),
+  `tauntImmunityIndex`, `pirateRepWithStations`, `missileStoresProbe`/`Beacon`,
+  `systemCurEnergy*`, `nebulaIsOpaque`, `sensorSetting`, `blocksShotFlag`, `triggersMines`.
 
 Confirm a VERIFY row or fill a HUMAN row and it's a one-line addition to the `_PROP` map.
