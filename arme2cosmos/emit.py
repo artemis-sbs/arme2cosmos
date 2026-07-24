@@ -20,7 +20,18 @@ _SIDE = {"0": "neutral", "1": "enemy", "2": "friendly"}
 # 2.8 add_ai block types that a2x_add_ai maps to a real brain (mirror of a2x.ai).
 # Others emit the call but a2x_add_ai is a no-op for them -> flagged in notes.
 _AI_MAPPED = {"CHASE_PLAYER", "CHASE_STATION", "CHASE_AI_SHIP", "CHASE_NEUTRAL",
-              "ATTACK", "TARGET_THROTTLE"}
+              "ATTACK", "TARGET_THROTTLE", "CHASE_FLEET"}
+
+# 2.8 AI blocks Cosmos handles structurally differently (or not at all) -> drop cleanly
+# rather than leave a TODO. Value is the reason emitted as a one-line comment.
+_AI_DROP = {
+    "TRY_TO_BECOME_LEADER": "Cosmos fleets need no leader",
+    "LEADER_LEADS": "Cosmos fleets need no leader",
+    "FOLLOW_LEADER": "Cosmos fleets need no leader",
+    "SPCL_AI": "LM fleets addon drives elite abilities (set via set_special)",
+    "ELITE_AI": "LM fleets addon drives elite abilities (set via set_special)",
+    "CHASE_WHALE": "no whale in Cosmos",
+}
 
 # 2.8 set_object_property names with a confirmed Cosmos mapping (mirror of a2x.props).
 # These emit a real a2x_set_object_property call; the rest stay # TODO. See
@@ -287,9 +298,11 @@ class Emitter:
         return [f'    a2x_incoming_comms_text("{body}", from_name="{frm}")']
 
     def c_add_ai(self, n: XmlNode) -> list[str]:
-        self.addons.add("ai")
         name = n.get("name")
         typ = (n.get("type") or "").upper()
+        if typ in _AI_DROP:
+            return [f'    # add_ai {typ}: dropped -- {_AI_DROP[typ]}']
+        self.addons.add("ai")
         var = self.symbols.get(name)
         if var is None:
             self.note(f"add_ai {typ} references object '{name}' not captured here "
