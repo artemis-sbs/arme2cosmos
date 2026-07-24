@@ -214,7 +214,16 @@ text, and an un-narrated multi-kill gets a synthesized `Destroy A and B` title f
 targets. 2.8's always-true `if_not_exists name="."` / `".."` sentinels are filtered out
 (they name no real object), so they never become a spurious `Destroy .` goal.
 
-Corpus effect: quests **150 → 1743**, beats **3324 → 1705**, all 27 still compile.
+**Story beats.** A pure-flag event with **no** objective trigger but narrative text
+(`big_message` / comms) becomes a **story-beat quest** — a story moment in the log.
+It is revealed when its gating flag is reached (the same reveal graph), then after a
+few seconds fires its narrative and its own `set_variable` (which reveals the next
+beat), so a 2.8 flag-chained narrative sequence reads as a chain of story beats. The
+body runs on `quest_completed` (via `Complete after:`) because `quest_reveal` does not
+emit `quest_activated`. Multi-gated narrated events stay loops (the reveal graph can't
+defer them without firing prematurely).
+
+Corpus effect: quests **150 → 1816**, beats **3324 → 1628**, all 27 still compile.
 
 **Reveal graph (implemented).** A watcher-backed objective gated on exactly one
 `F == v` becomes `State: secret` when a *later* event (not `<start>`) sets `F = v`: its

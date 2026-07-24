@@ -323,14 +323,16 @@ class AmdBuilder:
                 self.quests.append(q)
                 continue
             # an event carrying a real trigger becomes an OBJECTIVE quest (its flag guards
-            # fold into the trigger); pure flag-glue / continuous events stay loops.
-            q = self._objective_quest(ev, used_ids, terminal)
+            # fold into the trigger); a pure-flag NARRATED event becomes a STORY BEAT quest
+            # (a story moment in the log); pure flag-glue / continuous events stay loops.
+            q = self._objective_quest(ev, used_ids, terminal) \
+                or self._story_beat_quest(ev, used_ids, terminal)
             (self.quests.append(q) if q is not None else self.beats.append(ev))
         self._wire_reveal_graph()  # defer phase-gated watchers until their phase is reached
         self._aggregate_kills(used_ids)  # roll per-ship kills under one Parent quest
         # if nothing produced a real objective, still give the log a root quest
         if not any(q.goal or q.when or q.fail_on_all_dead or q.fail_on_signal
-                   or q.win or q.lose for q in self.quests):
+                   or q.win or q.lose or q.complete_after for q in self.quests):
             root = Quest("main", "Mission")
             root.desc = _amd_text(self.mission.description) or "Complete the mission."
             root.todos.append("no auto-mapped objective -- author Goal:/Win:/Lose: by hand")
@@ -360,17 +362,18 @@ class AmdBuilder:
                     if k[1] is not None:
                         event_sets.add(k)
         for q in self.quests:
-            if not q.gate_label or len(q.phase_gates) != 1:
-                continue
+            if len(q.phase_gates) != 1:
+                continue  # (watcher objectives AND story beats carry a single phase gate)
             flag, vkey, vraw = q.phase_gates[0]
             key = (flag, vkey)
             if key not in event_sets or key in start_sets:
                 continue  # produced at start (or never) -> leave active from t=0
             q.state = "secret"
-            self.deferred_gates.add(q.gate_label)
+            if q.gate_label:                       # a watcher objective -> also start it
+                self.deferred_gates.add(q.gate_label)
             self.em.phase_signals.add(key)
             vraw2, items = self.phase_routes.setdefault(key, (vraw, []))
-            items.append((q.key, q.gate_label))
+            items.append((q.key, q.gate_label))    # gate_label is None for a story beat
 
     def _aggregate_kills(self, used_ids: set) -> None:
         """Roll the per-ship ``Goal: destroy 1 <role>`` objectives under one synthetic
@@ -525,6 +528,42 @@ class AmdBuilder:
             q.title = _quest_title(ev, q)
         if ev.commands:
             self.completion_bodies.append((key, list(ev.commands), q.body_signal))
+        return q
+
+    def _story_beat_quest(self, ev: Event, used_ids: set, terminal: set):
+        """A pure-flag NARRATED event (no real trigger, but carries big_message / comms)
+        -> a story-beat quest: a story moment that appears in the log. It is revealed when
+        its gating flag is reached (reveal graph, like a phase-gated objective), fires its
+        narrative on activation (``quest_activated``), and auto-clears a few seconds later
+        so the log advances. Its own ``set_variable`` reveals the next beat -- so a 2.8
+        flag-chained narrative sequence reads as a chain of story beats. Un-narrated
+        pure-flag events (glue) return None and stay background loops."""
+        if any(c.tag in _REAL_TRIGGER_TAGS for c in ev.conditions):
+            return None  # has a trigger -> an objective, not a bare story beat
+        text = self._objective_text(ev)
+        if not text:
+            return None  # not narrated -> flag glue, stays a loop
+        # its single positive phase gate (revealed when a LATER event sets it). A beat with
+        # 0 gates is an intro (active from start); with >1 the reveal graph can't defer it
+        # (it would fire prematurely) -> leave it a loop.
+        gates = [(c.get("name"), _num_key(c.get("value")), c.get("value"))
+                 for c in ev.conditions if c.tag == "if_variable"
+                 and (c.get("comparator", "") or "").strip().upper() in ("EQUALS", "=")
+                 and _num_key(c.get("value")) is not None and c.get("name") not in terminal]
+        if len(gates) > 1:
+            return None
+        key = _quest_key(ev, used_ids)
+        q = Quest(key, ev.name or key)
+        q.desc = text
+        q.title = _quest_title(ev, q)
+        q.phase_gates = gates
+        # A story beat is displayed, then a few seconds later fires its narrative body
+        # (comms / big_message + its set_variable, which reveals the next beat) and clears.
+        # Body on quest_completed (Complete after drives it) -- quest_reveal/mark_active
+        # does NOT emit quest_activated, so an activation-body would never fire.
+        q.complete_after = "5 seconds"
+        if ev.commands:
+            self.completion_bodies.append((key, list(ev.commands), "quest_completed"))
         return q
 
     def _fill_objective(self, q: Quest, ev: Event, terminal: set) -> None:
@@ -811,7 +850,8 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
         L.append(f"//signal/{sig}   # phase {flag} == {vraw} reached -> reveal + start")
         L.append(f"    quest_reveal(SHARED, {keys!r})")
         for _k, gl in items:
-            L.append(f"    task_schedule({gl})")
+            if gl:                       # a watcher objective; story beats reveal only
+                L.append(f"    task_schedule({gl})")
         L.append("    ->END")
         L.append("")
 
