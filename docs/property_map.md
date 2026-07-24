@@ -40,10 +40,8 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `turnRate` (90) | data_set | `turn_rate` | **DONE** | FIXED: was `turnRate` (dead key the engine never reads); the steering physics (NPC + player) reads `turn_rate` |
 | `throttle` (9) | data_set | `throttle` | **DONE** | |
 | `artScale` (89) | data_set | `local_scale_coeff` | **DONE** | |
-| `angle` (137) | quat | yaw quaternion `rot_quat = (cos t/2, 0, sin t/2, 0)` | VERIFY | Mechanics PROVEN (set yaw t -> forward `(sin t, 0, cos t)`); `coords.angle` gives the 2.8->Cosmos mirror. NOT auto-landed: (1) zero-reference 2.8<->Cosmos unverified, (2) NPC AI re-aims immediately so it only matters for stations/un-brained, (3) the mock's a2x objects have no `rot_quat` so it isn't mock-testable end-to-end. Land behind a real-engine facing spot-check. |
-| `pitch` (13) | quat | orientation quaternion | VERIFY | same as `angle`; needs euler composition (yaw+pitch+roll can't each overwrite the quat) |
-| `roll` (24) | quat | orientation quaternion | VERIFY | same as `angle` |
-| `topSpeed` (564) | data_set | `speed_coeff` (0-1) | **DONE** | PROVEN behaviorally vs the mock engine physics: NPC cruise = throttle x 36 u/s x speed_coeff (1.0/0.5/0.25 -> 36/18/9). 2.8 topSpeed values are already 0-1 coeffs (1:1). **NPC-only** -- Cosmos player top speed is fixed (playerThrottle x 180, no speed_coeff), so on a player it's a harmless no-op (0 corpus sites use player_slot) |
+| `angle`/`pitch`/`roll` (137/13/24) | quat | orientation quaternion | VERIFY | WIKI: these are **radians** (not degrees), **clockwise from south** (0=south, +pi/2=west, pi/-pi=north, -pi/2=east). Yaw mechanics PROVEN (yaw t -> forward `(sin t, cos t)`). Still needs the Cosmos-side CW/CCW + east/west + the a2x_pos X/Z mirror reconciled by a facing spot-check; the mock's a2x objects have no `rot_quat` so not mock-testable |
+| `topSpeed` (564) | data_set | `speed_coeff` (0-1) | **DONE** | PROVEN behaviorally vs the mock engine physics: NPC cruise = throttle x 36 u/s x speed_coeff (1.0/0.5/0.25 -> 36/18/9). NPC-only (Cosmos player top speed is fixed). WIKI: 2.8 topSpeed 1.0 = 100 u/s, so the 1:1 map preserves RELATIVE NPC speeds but not the absolute (Cosmos NPC baseline is 36 u/s, its own scale) |
 | `currentRealSpeed` (26) | obj | `cur_speed` (space_object attr) | **DONE** | read side: physics-driven current speed; setting is overwritten each tick (effectively read-only) |
 | `pushRadius` (269) | obj | `exclusion_radius` (space_object property) | **DONE** | 2.8 push radius = the object's exclusion / collision radius |
 | `deltaX` (2) | — | velocity; no data_set key | HUMAN | drop? |
@@ -59,7 +57,7 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `shieldMaxStateFront` (77) | data_set | `shield_max_val` [0] | **DONE** | |
 | `shieldMaxStateBack` (85) | data_set | `shield_max_val` [1] | **DONE** | |
 | `shieldsOn` (2) | data_set | `shields_raised_flag` | **DONE** | |
-| `shieldState` (14) | data_set | `shield_val` [?] | VERIFY | which index / both? |
+| `shieldState` (14) | data_set | `shield_val` | VERIFY | WIKI (station): current shield strength (e.g. 400); can't exceed the inherent max |
 
 ## Weapon stores & ammo
 
@@ -109,17 +107,17 @@ overpower/coolant).
 | `systemCurHeat*` (8 systems, ~41 ea) | data_set | `system_cur_heat` [SHPSYS 0..3] | VERIFY | index per the 8->4 collapse above (Beam/Torpedo->0, Impulse/Turning/Warp->1, Tactical->2, Front/BackShield->3); normalize the 2.8 value to 0..1. No `systemCurCoolant*` in the a28 corpus |
 | `systemDamageImpulse` (13) | data_set | `system_damage` [idx] | VERIFY | impulse system |
 | `systemDamageTurning` (6) | data_set | `system_damage` [idx] | VERIFY | turning / maneuver system |
-| `warpState` (58) | data_set | `warp_drive_active` (flag) | VERIFY | 2.8 had a level; Cosmos has 0/1 |
-| `systemCurEnergy*` (8 systems, ~32 ea) | data_set | `eng_control_value` [per control] | VERIFY | the **engineering power slider** per system (2.8 % -> Cosmos 0..3 = 0..300%); index via `eng_control_type_index` / the 8->4 SHPSYS collapse above |
+| `warpState` (58) | data_set | player warp level | VERIFY | WIKI: 0-4 current warp speed (jump ships always 0). Cosmos: playerThrottle>1 = warp (1..5) -- map 0-4 onto that |
+| `systemCurEnergy*` (8 systems, ~32 ea) | data_set | `eng_control_value` [per control] | VERIFY | WIKI: **0.0-1.0** = the Engineering console power slider per system (Beam/Torpedo/Sensors/Maneuver/Impulse/Warp/FrontShld/RearShld). Cosmos over-power goes 0..3 (300%), so 2.8 0-1 maps to the 0-100% part; index via the 8->4 SHPSYS collapse |
 
 ## Enemy AI / elite
 
 | 2.8 property | Target | Cosmos | Status | Notes |
 |---|---|---|---|---|
 | `hasSurrendered` (328) | data_set | `surrender_flag` | **DONE** | 0 = not surrendered |
-| `eliteAbilityBits` (40) | data_set | decompose -> `elite_*` flags | VERIFY | bit->flag decomposition confirmed by author; wire the bit-split |
-| `surrenderChance` (52) | — | script-side calc | HUMAN | it's a calculation in Cosmos script, not a data key |
-| `tauntImmunityIndex` (24) | — | no key | HUMAN | |
+| `eliteAbilityBits` / `specialAbilityBits` (40) | data_set | `a2x_set_special_bits` | **DONE** | WIKI bit-sum (1=Stealth,2=LowVis,4=Cloak,8=HET,16=Warp,32=Teleport,64=Tractor,128=Drones,256=AntiMine,512=AntiTorp,1024=ShldDrain,2048=ShldVamp,4096=TeleBack,8192=ShldReset) -> each `set_special` |
+| `surrenderChance` (52) | — | script-side calc | HUMAN | WIKI: 0-100 (a %); in Cosmos it's a script calculation, not a data key |
+| `tauntImmunityIndex` (24) | — | no key | HUMAN | WIKI: 0, 1, or 2 |
 | `age` (19) | — | LM monster age system | VERIFY | monsters have an age system now (LM prefabs: `monster_roll_age` / `monster_bake_age` + stage roles) -- map to that, not a raw key |
 
 ## Side / identity
@@ -145,8 +143,8 @@ spawns if needed.
 | `playerShields` (25) | data_set | `all_shield_upgrade_coeff` on all players | **DONE** | |
 | `playerWeapon` (25) | data_set | `all_beam_upgrade_coeff` on all players | **DONE** | |
 | `musicObjectMasterVolume` (299) | setting | Cosmos music-volume API | VERIFY | no equiv add a stub |
-| `nebulaIsOpaque` (30) | setting | global nebula setting | HUMAN |  |
-| `sensorSetting` (38) | setting | global sensor setting | HUMAN | |
+| `nebulaIsOpaque` (30) | setting | global nebula setting | HUMAN | WIKI: 0/1, ~ the "Nebula Hides All" PVP server setting |
+| `sensorSetting` (38) | setting | sensor range setting | HUMAN | WIKI: 0 = unlimited (100km), N = 100/(3N) km (1=33, 2=16, 3=11, 4=8km ...) |
 
 ---
 
@@ -169,19 +167,31 @@ Beyond `set_object_property`, these 2.8 commands are also wired:
 
 - **DONE (verified, emitting real calls):** `position*` (with flip), `angleDelta`/
   `rollDelta`/`pitchDelta`, `turnRate` (-> `turn_rate`), `topSpeed` (-> `speed_coeff`,
-  behaviorally proven, NPC-only), `currentRealSpeed` (-> `cur_speed`, read), `throttle`,
-  `artScale`, `energy`, `hasSurrendered`, `shieldsOn`, `shieldState{Front,Back}`,
-  `shieldMaxState{Front,Back}`, `missileStores{Nuke,Homing,Mine,EMP}`,
-  `count{Nuke,Homing,Mine,EMP}` -- plus the `addto` / `copy` / `set_ship_text` /
+  behaviorally proven, NPC-only), `currentRealSpeed` (-> `cur_speed`, read), `pushRadius`
+  (-> `exclusion_radius`), `throttle`, `artScale`, `energy`, `hasSurrendered`, `shieldsOn`,
+  `shieldState{Front,Back}`, `shieldMaxState{Front,Back}`,
+  `missileStores{Nuke,Homing,Mine,EMP,PShock,Tag,ECM}`, `count{Nuke,Homing,Mine,EMP,Shk}`,
+  `sideValue` (-> `a2x_set_side_value`), `eliteAbilityBits`/`specialAbilityBits`
+  (-> `a2x_set_special_bits`) -- plus the `addto` / `copy` / `set_ship_text` /
   `set_relative_position` / `set_special` commands.
-- **VERIFY (key known / confirmed -- ready to wire):** `pushRadius` (-> exclusion radius),
-  `missileStoresPShock`/`Tag`/`ECM` + `countShk` (-> the LM `PShock_NUM` / `Tag_NUM` /
-  `EMP_NUM` torpedo keys), `sideValue`->roles (reuse `a2x_set_side_value`),
-  `eliteAbilityBits` bit-decomposition, monster `age` (-> LM age system), `angle`/`pitch`/
-  `roll` heading writes, `shieldState`, the `systemCurHeat*` / `systemDamage*` 8->4 index
-  mapping, `warpState`, `musicObjectMasterVolume`.
+- **VERIFY (key known / ready to wire):** monster `age` (-> LM age system), `angle`/`pitch`/
+  `roll` (radians CW-from-south, needs facing spot-check), `shieldState`, the
+  `systemCurHeat*`/`systemCurEnergy*`/`systemDamage*` indexed writes (8->4 SHPSYS collapse),
+  `warpState`, `musicObjectMasterVolume`.
 - **HUMAN (no Cosmos key, or "drop"):** `surrenderChance` (script-side calc),
   `tauntImmunityIndex`, `pirateRepWithStations`, `missileStoresProbe`/`Beacon`,
-  `systemCurEnergy*`, `nebulaIsOpaque`, `sensorSetting`, `blocksShotFlag`, `triggersMines`.
+  `nebulaIsOpaque`, `sensorSetting`, `blocksShotFlag`, `triggersMines`, `deltaX`.
 
 Confirm a VERIFY row or fill a HUMAN row and it's a one-line addition to the `_PROP` map.
+
+## Related follow-ups (from the Artemis wiki, not `set_object_property`)
+
+- **`add_ai` brain stack** — the 2.8 AI blocks (CHASE_PLAYER/STATION/AI_SHIP, ATTACK,
+  DIR_THROTTLE, GUARD_STATION, monster CHASE_MONSTER/RANDOM_PATROL, ...) map to Cosmos
+  brains. Note: **Cosmos fleets need no leader**, so drop `TRY_TO_BECOME_LEADER` /
+  `LEADER_LEADS` / `FOLLOW_LEADER`. See the wiki Default Brain Stack.
+- **`set_player_carried_type`** (26) — HANGAR: a single-seat craft (shuttle/fighter/bomber)
+  carried in a player ship (`player_slot` + `bay_slot`); must run before the player is
+  created. Wire via the LM `hangar` addon.
+- **Monster properties** (2.7.2+) — `speed`/`health`/`maxHealth`/`turnRate`/`age`/`size`;
+  `age` is 1/2/3 = Young/Mature/Ancient (= the LM prefab age stages).
