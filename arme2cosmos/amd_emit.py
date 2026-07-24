@@ -26,6 +26,12 @@ _LOSE_WORDS = ("fail", "died", "doomed", "destroyed", "lost", "defeat", "death",
 
 _PLAYER_ROLE = "player_hero"  # role tagged on the player so `Fail on all dead:` can name it
 
+# 2.8 conditions that are a real objective TRIGGER (vs an `if_variable` flag guard or a
+# continuous `if_exists` gate). An event carrying one of these becomes an objective quest.
+_REAL_TRIGGER_TAGS = {"if_not_exists", "if_fleet_count", "if_docked", "if_distance",
+                      "if_inside_sphere", "if_outside_sphere", "if_timer_finished",
+                      "if_object_property"}
+
 
 # --- small local reuses (kept here to avoid a convert<->amd_emit import cycle) --------
 def _truthy(v: str) -> bool:
@@ -217,58 +223,51 @@ class AmdBuilder:
         else:
             q.todos.append(f"trigger not mapped: {' '.join(_xml_one(c) for c in conds)}")
 
-    def _extract_timed_chain(self, used_ids: set) -> set:
-        """Find a linear chain of timed narrative beats and emit it as a reveal chain of
-        `Complete after:` quests (with bodies on //signal/quest_completed). Returns the
-        set of consumed events. Conservative: only a chain of >=2 beats sharing one
-        timer+flag is taken; a lone timed event stays a background loop.
-
-        A beat = an event gated on exactly ``if_timer_finished T`` + ``if_variable F == n``
-        that advances ``F`` (2.8's timed-sequence idiom). Ordered by ``n``; each beat's
-        wait is the timer the previous step reset (the ``<start>`` timer for the first)."""
-        beats = []
+    def _extract_timed_chains(self, used_ids: set) -> set:
+        """Emit EVERY linear chain of >=2 timed narrative beats as a reveal chain of
+        `Complete after:` quests (bodies on //signal/quest_completed). Returns the set of
+        consumed event ids. A beat = an event gated on exactly ``if_timer_finished T`` +
+        ``if_variable F == n`` that advances ``F`` (2.8's timed-sequence idiom); each
+        beat's wait is the timer the previous step reset (the ``<start>`` timer first)."""
+        groups: dict[tuple, list] = {}
         for ev in self.events:
             info = _beat_info(ev)
             if info:
-                beats.append((ev, info))
-        # group by (flag, timer); keep the largest chain only (prototype scope)
-        groups: dict[tuple, list] = {}
-        for ev, info in beats:
-            groups.setdefault((info["F"], info["T"]), []).append((ev, info))
-        chain = max(groups.values(), key=len, default=[])
-        if len(chain) < 2:
-            return set()
-        chain.sort(key=lambda ei: ei[1]["n"])
-        timer = chain[0][1]["T"]
-        start_secs = next((n.get("seconds") for n in self.mission.start
-                           if n.tag == "set_timer" and n.get("name") == timer), None)
-
-        keys = [_quest_key(ev, used_ids) for ev, _ in chain]
-        prev_secs = start_secs
-        for i, (ev, info) in enumerate(chain):
-            q = Quest(keys[i], ev.name or keys[i])
-            q.state = "active" if i == 0 else "secret"
-            if prev_secs:
-                q.complete_after = f"{prev_secs} seconds"
-            else:
-                q.todos.append("timed beat: could not resolve the wait duration -- set "
-                               "`Complete after:` by hand")
-            if i + 1 < len(chain):
-                q.reveal = keys[i + 1]
-            # body = the beat's commands minus the chain plumbing (timer reset + flag advance)
-            body = [n for n in ev.commands
-                    if not (n.tag == "set_timer" and n.get("name") == info["T"])
-                    and not (n.tag == "set_variable" and n.get("name") == info["F"])]
-            if body:
-                self.completion_bodies.append((keys[i], body))
-            self.quests.append(q)
-            prev_secs = info["set_timer_secs"] or prev_secs
-        return {id(ev) for ev, _ in chain}
+                groups.setdefault((info["F"], info["T"]), []).append((ev, info))
+        consumed: set = set()
+        for (fflag, timer), chain in groups.items():
+            if len(chain) < 2:
+                continue  # a lone timed event is handled as an objective quest instead
+            chain.sort(key=lambda ei: ei[1]["n"])
+            start_secs = next((n.get("seconds") for n in self.mission.start
+                               if n.tag == "set_timer" and n.get("name") == timer), None)
+            keys = [_quest_key(ev, used_ids) for ev, _ in chain]
+            prev_secs = start_secs
+            for i, (ev, info) in enumerate(chain):
+                q = Quest(keys[i], ev.name or keys[i])
+                q.state = "active" if i == 0 else "secret"
+                if prev_secs:
+                    q.complete_after = f"{prev_secs} seconds"
+                else:
+                    q.todos.append("timed beat: could not resolve the wait duration -- "
+                                   "set `Complete after:` by hand")
+                if i + 1 < len(chain):
+                    q.reveal = keys[i + 1]
+                q.desc = self._objective_text(ev) or q.desc
+                body = [n for n in ev.commands
+                        if not (n.tag == "set_timer" and n.get("name") == info["T"])
+                        and not (n.tag == "set_variable" and n.get("name") == info["F"])]
+                if body:
+                    self.completion_bodies.append((keys[i], body))
+                self.quests.append(q)
+                prev_secs = info["set_timer_secs"] or prev_secs
+            consumed |= {id(ev) for ev, _ in chain}
+        return consumed
 
     def build(self) -> None:
         terminal = _terminal_flags(self.mission)
-        used_ids = set()
-        chained = self._extract_timed_chain(used_ids)  # ids of timed beats -> reveal chain
+        used_ids: set = set()
+        chained = self._extract_timed_chains(used_ids)  # all timed reveal chains
         for ev in self.events:
             if id(ev) in chained:
                 continue  # already emitted as a reveal-chain quest
@@ -285,16 +284,125 @@ class AmdBuilder:
                     q.lose = _outcome_prose(ev)
                 else:
                     q.todos.append("win or lose? (end-game decider -- classify by hand)")
+                q.desc = self._objective_text(ev) or q.desc
                 q.title = _quest_title(ev, q)
                 self.quests.append(q)
-            else:
-                self.beats.append(ev)
-        # if no decider produced a real objective, still give the log a root quest
+                continue
+            # an event carrying a real trigger becomes an OBJECTIVE quest (its flag guards
+            # fold into the trigger); pure flag-glue / continuous events stay loops.
+            q = self._objective_quest(ev, used_ids, terminal)
+            (self.quests.append(q) if q is not None else self.beats.append(ev))
+        # if nothing produced a real objective, still give the log a root quest
         if not any(q.goal or q.when or q.fail_on_all_dead for q in self.quests):
             root = Quest("main", "Mission")
             root.desc = _amd_text(self.mission.description) or "Complete the mission."
             root.todos.append("no auto-mapped objective -- author Goal:/Win:/Lose: by hand")
             self.quests.insert(0, root)
+
+    # -- objective quests (flag-guarded trigger events) --------------------------------
+    def _dropped_guards(self, ev: Event, terminal: set) -> list:
+        """`if_variable` conditions to drop from an event's trigger: the end_mission
+        terminal flags, the event's OWN flags (run-once/advance bookkeeping), and
+        "not-yet" latches (``!= v`` or ``== 0``). What survives is a genuine phase gate
+        set by ANOTHER event, which folds into the objective's trigger watcher."""
+        sets = {c.get("name") for c in ev.commands if c.tag == "set_variable"}
+        out = []
+        for c in ev.conditions:
+            if c.tag != "if_variable":
+                continue
+            name = c.get("name")
+            cmp = (c.get("comparator", "") or "").strip().upper()
+            is_zero = (c.get("value", "") or "").strip() in ("0", "0.0")
+            latch = cmp in ("NOT", "!=") or (cmp in ("EQUALS", "=") and is_zero)
+            if name in terminal or name in sets or latch:
+                out.append(c)
+        return out
+
+    def _objective_text(self, ev: Event) -> str:
+        """Objective/description prose lifted from the event's big_message or first comms
+        (2.8 has no objective text; this is a readability upgrade, not gameplay)."""
+        for n in ev.commands:
+            if n.tag == "big_message":
+                t = _amd_text(" ".join(filter(None, (n.get("title"), n.get("subtitle1"),
+                                                     n.get("subtitle2")))))
+                if t:
+                    return t
+        for n in ev.commands:
+            if n.tag == "incoming_comms_text" and n.text:
+                return _amd_text(n.text[:140])
+        return ""
+
+    def _native_goal_kind(self, ev: Event, terminal: set) -> str | None:
+        """'kill' / 'player' if this event's trigger is a concrete destroy/survive goal,
+        else None. Mirrors the native branch of :meth:`_fill_objective`."""
+        conds = [c for c in ev.conditions if c not in self._dropped_guards(ev, terminal)]
+        reals = [c for c in conds if c.tag in _REAL_TRIGGER_TAGS]
+        kept_flags = [c for c in conds if c.tag == "if_variable"]
+        if (len(conds) == 1 and reals and reals[0].tag == "if_not_exists"
+                and _is_player_ref(self.em, reals[0])):
+            return "player"
+        if not kept_flags and len(reals) == 1:
+            c = reals[0]
+            if (c.tag == "if_not_exists" and not _is_player_ref(self.em, c)
+                    and self.em.symbols.get(c.get("name") or "")):
+                return "kill"
+            if c.tag == "if_fleet_count" and c.get("fleetnumber"):
+                return "kill"
+        return None
+
+    def _objective_quest(self, ev: Event, used_ids: set, terminal: set):
+        """An event -> an objective quest, or None (stays a background loop).
+
+        Promoted only if it is a genuine objective: a concrete kill/survive goal, or a
+        NARRATED event (carries big_message / comms text). A bare mechanism event -- a
+        trigger with no player-facing text and no kill goal (beacon toggles, score
+        bookkeeping) -- is not an objective and stays a loop."""
+        if not any(c.tag in _REAL_TRIGGER_TAGS for c in ev.conditions):
+            return None
+        text = self._objective_text(ev)
+        if not text and self._native_goal_kind(ev, terminal) is None:
+            return None
+        key = _quest_key(ev, used_ids)
+        q = Quest(key, ev.name or key)
+        self._fill_objective(q, ev, terminal)
+        q.desc = text or q.desc
+        q.title = _quest_title(ev, q)
+        if ev.commands:
+            self.completion_bodies.append((key, list(ev.commands)))
+        return q
+
+    def _fill_objective(self, q: Quest, ev: Event, terminal: set) -> None:
+        dropped = self._dropped_guards(ev, terminal)
+        conds = [c for c in ev.conditions if c not in dropped]
+        kept_flags = [c for c in conds if c.tag == "if_variable"]
+        reals = [c for c in conds if c.tag in _REAL_TRIGGER_TAGS]
+        # sole player death -> a critical fail-on-death
+        if (len(conds) == 1 and reals and reals[0].tag == "if_not_exists"
+                and _is_player_ref(self.em, reals[0])):
+            q.critical = True
+            q.fail_on_all_dead = _PLAYER_ROLE
+            if self.em.player_var:
+                self._add_role(self.em.player_var, _PLAYER_ROLE)
+            return
+        # native kill goal when nothing else gates it (target existence IS the gate)
+        if not kept_flags and len(reals) == 1:
+            c = reals[0]
+            if (c.tag == "if_not_exists" and not _is_player_ref(self.em, c)
+                    and self.em.symbols.get(c.get("name") or "")):
+                role = _pyname(c.get("name")).lower()
+                q.goal = f"destroy 1 {role}"
+                self._add_role(self.em.symbols[c.get("name")], role)
+                return
+            if c.tag == "if_fleet_count" and c.get("fleetnumber"):
+                fl = c.get("fleetnumber")
+                q.goal = f"destroy {_fleet_sizes(self.mission).get(fl, 1)} fleet_{fl}"
+                return
+        # otherwise a watcher ANDs the real trigger with any surviving phase-gate flags
+        expr = [c for c in conds if _cond_bool(self.em, c) is not None]
+        if expr:
+            q.when = f"signal {self._new_gate(expr)}"
+        else:
+            q.todos.append(f"trigger not expressible: {' '.join(_xml_one(c) for c in conds)}")
 
 
 import re as _re

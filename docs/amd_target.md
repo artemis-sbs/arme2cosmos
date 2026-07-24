@@ -187,6 +187,41 @@ python -m arme2cosmos convert <MISS_Practice.xml> --target amd --out out_amd
 
 ---
 
+## Objective quests from the flag graph
+
+2.8 missions are **flag state machines**: most events carry a real trigger (kill /
+dock / reach / timer / property) *plus* `if_variable` flag guards, so early versions
+of this target only promoted *sole*-trigger events and dumped the rest into polling
+loops. The converter now promotes any event that is a **genuine objective** — a
+concrete kill/survive goal, or a **narrated** event (carries `big_message` / comms
+text) — to a quest:
+
+- Flag guards are split: the end-game terminal flags, the event's own run-once/advance
+  flags, and "not-yet" latches (`!= v` / `== 0`) are **dropped**; a surviving phase
+  gate (a flag another event sets to a positive value) **folds into the trigger**.
+- A clean kill (`if_not_exists NAME` with no surviving gate) → native `Goal: destroy 1
+  <role>`; a phase-gated or non-kill trigger → an escape-hatch watcher that ANDs the
+  trigger with its phase gate → `When: signal a2x_gate_N`.
+- The event's `big_message`/comms becomes the quest's **objective text** (2.8 has none).
+- Bare **mechanism** events (a trigger but no player text and no kill goal — beacon
+  toggles, score bookkeeping) are **not** objectives and stay background loops.
+
+Corpus effect: quests **150 → 1372**, beats **3324 → 2082**, all 27 still compile.
+
+**Caveats / next refinements (known):**
+- **Watcher volume.** Phase-gated objectives each get a polling watcher — ~929 across
+  the corpus (Cruiser alone ~230). The fix is a **reveal graph**: make a downstream
+  quest `State: secret` and have its phase-setter `Then: reveal` it, so its watcher
+  only runs once the phase is reached (most watchers are dormant instead of all polling
+  at once). Not yet built.
+- **Friendly-target kills.** `if_not_exists <friendly base>` becomes `Goal: destroy 1
+  <base>` even when destroying it is a **penalty/loss** (e.g. Cruiser's
+  "DS1 Destroyed / Penalty -90 kilotons"). A side-aware pass should route a
+  friendly-target `if_not_exists` to a `Lose:`/penalty instead of a goal.
+- **Aggregation.** A tournament's N per-pirate kills should roll under a `Parent:`
+  "Destroy the pirate fleet" with `Required:` children (or one `Goal: destroy N
+  pirates`) rather than N separate log entries.
+
 ## What stays MAST (graceful degradation)
 
 - **Compound / non-verb triggers** → escape-hatch watchers (`gate_N`). Nothing is
