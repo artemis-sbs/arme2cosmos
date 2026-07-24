@@ -16,7 +16,8 @@ semantics: an ambiguous end-game event is emitted with a ``// TODO win or lose?`
 
 from __future__ import annotations
 
-from .emit import Emitter, emit_condition, _cond_bool, _pyname, _mast_str, _value
+from .emit import (Emitter, emit_condition, _cond_bool, _pyname, _mast_str, _value,
+                   _num_key, _phase_sig_name)
 from .model import Event, Mission, XmlNode
 
 # Keywords that classify an end-game decider event as a win or a loss (matched against
@@ -59,6 +60,8 @@ class Quest:
         self.when: str | None = None       # `When: signal a2x_gate_0`
         self.complete_after: str | None = None  # `Complete after: 60 seconds` (timed beat)
         self.reveal: str | None = None     # `Then: reveal <key>` (reveal chain)
+        self.gate_label: str | None = None  # its escape-hatch watcher label (if When: signal)
+        self.phase_gates: list = []         # [(flag, vkey, vraw)] surviving phase-gate flags
         self.critical = False
         self.fail_on_all_dead: str | None = None
         self.win: str | bool | None = None   # prose reason, True (bare flag), or None
@@ -174,16 +177,22 @@ class AmdBuilder:
         # (quest_key, [body XmlNodes]) -> a //signal/quest_completed route (reveal chain)
         self.completion_bodies: list[tuple[str, list[XmlNode]]] = []
         self._gate = 0
+        # reveal graph: watcher labels deferred until their phase is reached, and the
+        # phase routes that reveal+start them. Keyed by (flag, vkey) -> (vraw, [(q,label)]).
+        self.deferred_gates: set[str] = set()
+        self.phase_routes: dict[tuple[str, str], tuple] = {}
 
     def _add_role(self, var: str, role: str) -> None:
         if (var, role) not in self.roles:
             self.roles.append((var, role))
 
-    def _new_gate(self, conditions: list[XmlNode]) -> str:
-        label = f"a2x_gate_{self._gate}"
-        self.watchers.append((f"gate_{self._gate}", conditions))
+    def _new_gate(self, conditions: list[XmlNode]) -> tuple[str, str]:
+        """Register an escape-hatch watcher; return (signal_name, task_label)."""
+        sig = f"a2x_gate_{self._gate}"
+        label = f"gate_{self._gate}"
+        self.watchers.append((label, conditions))
         self._gate += 1
-        return label
+        return sig, label
 
     def _trigger_for(self, q: Quest, ev: Event, terminal: set[str]) -> None:
         """Fill a quest's completion trigger from a decider event's conditions."""
@@ -219,7 +228,9 @@ class AmdBuilder:
         # nothing expressible as a verb -> escape hatch (a MAST watcher emits the signal)
         expressible = [c for c in conds if _cond_bool(self.em, c) is not None]
         if expressible:
-            q.when = f"signal {self._new_gate(expressible)}"
+            sig, label = self._new_gate(expressible)
+            q.when = f"signal {sig}"
+            q.gate_label = label
         else:
             q.todos.append(f"trigger not mapped: {' '.join(_xml_one(c) for c in conds)}")
 
@@ -292,12 +303,49 @@ class AmdBuilder:
             # fold into the trigger); pure flag-glue / continuous events stay loops.
             q = self._objective_quest(ev, used_ids, terminal)
             (self.quests.append(q) if q is not None else self.beats.append(ev))
+        self._wire_reveal_graph()  # defer phase-gated watchers until their phase is reached
         # if nothing produced a real objective, still give the log a root quest
         if not any(q.goal or q.when or q.fail_on_all_dead for q in self.quests):
             root = Quest("main", "Mission")
             root.desc = _amd_text(self.mission.description) or "Complete the mission."
             root.todos.append("no auto-mapped objective -- author Goal:/Win:/Lose: by hand")
             self.quests.insert(0, root)
+
+    def _wire_reveal_graph(self) -> None:
+        """Defer each single-phase-gated objective quest until its phase is reached.
+
+        A watcher-backed quest gated on exactly one ``F == v`` becomes ``State: secret``
+        when some LATER event (not the ``<start>`` block) sets ``F = v``: its watcher is
+        left OUT of the up-front schedule and a ``//signal/a2x_phase_F_v`` route reveals
+        the quest + starts its watcher when the phase is reached. This turns "all watchers
+        poll from t=0" into "a watcher runs only once its phase is live", and gives the
+        quest log real phase structure. Multi-gate / start-produced / unproduced gates are
+        left active from the start (correctness over cleverness)."""
+        # which (flag, vkey) are set by the <start> block vs by a later event
+        start_sets, event_sets = set(), set()
+        for n in self.mission.start:
+            if n.tag == "set_variable":
+                k = (n.get("name"), _num_key(n.get("value")))
+                if k[1] is not None:
+                    start_sets.add(k)
+        for ev in self.mission.events:
+            for n in ev.commands:
+                if n.tag == "set_variable":
+                    k = (n.get("name"), _num_key(n.get("value")))
+                    if k[1] is not None:
+                        event_sets.add(k)
+        for q in self.quests:
+            if not q.gate_label or len(q.phase_gates) != 1:
+                continue
+            flag, vkey, vraw = q.phase_gates[0]
+            key = (flag, vkey)
+            if key not in event_sets or key in start_sets:
+                continue  # produced at start (or never) -> leave active from t=0
+            q.state = "secret"
+            self.deferred_gates.add(q.gate_label)
+            self.em.phase_signals.add(key)
+            vraw2, items = self.phase_routes.setdefault(key, (vraw, []))
+            items.append((q.key, q.gate_label))
 
     # -- objective quests (flag-guarded trigger events) --------------------------------
     def _dropped_guards(self, ev: Event, terminal: set) -> list:
@@ -400,7 +448,12 @@ class AmdBuilder:
         # otherwise a watcher ANDs the real trigger with any surviving phase-gate flags
         expr = [c for c in conds if _cond_bool(self.em, c) is not None]
         if expr:
-            q.when = f"signal {self._new_gate(expr)}"
+            sig, label = self._new_gate(expr)
+            q.when = f"signal {sig}"
+            q.gate_label = label
+            # surviving `if_variable F == v` guards are phase gates -> reveal-graph inputs
+            q.phase_gates = [(c.get("name"), _num_key(c.get("value")), c.get("value"))
+                             for c in kept_flags if _num_key(c.get("value")) is not None]
         else:
             q.todos.append(f"trigger not expressible: {' '.join(_xml_one(c) for c in conds)}")
 
@@ -566,15 +619,30 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
              'get_mission_dir_filename("story.amd"), data_parser=amd_quest_data))')
     L.append("")
 
-    if builder.watchers or builder.beats:
-        L.append("    # --- start escape-hatch watchers + background narrative beats ---")
-        for gl, _c in builder.watchers:
+    active_watchers = [gl for gl, _c in builder.watchers if gl not in builder.deferred_gates]
+    if active_watchers or builder.beats:
+        L.append("    # --- start non-deferred watchers + background beats "
+                 f"({len(builder.deferred_gates)} watcher(s) deferred to phase routes) ---")
+        for gl in active_watchers:
             L.append(f"    task_schedule({gl})")
         for i, _ev in enumerate(builder.beats):
             L.append(f"    task_schedule(beat_{i})")
         L.append("")
     L.append("    ->END")
     L.append("")
+
+    # reveal graph: when a phase flag reaches its value, reveal the quests gated on it and
+    # start their (until-now-dormant) watchers. Fed by the phase signal emitted in
+    # c_set_variable wherever that flag is set (a body / beat / another quest).
+    for (flag, vkey), (vraw, items) in builder.phase_routes.items():
+        sig = _phase_sig_name(flag, vkey)
+        keys = [k for k, _ in items]
+        L.append(f"//signal/{sig}   # phase {flag} == {vraw} reached -> reveal + start")
+        L.append(f"    quest_reveal(SHARED, {keys!r})")
+        for _k, gl in items:
+            L.append(f"    task_schedule({gl})")
+        L.append("    ->END")
+        L.append("")
 
     # escape-hatch watchers: poll a non-verb condition, emit the quest's `When:` signal.
     for gl, conds in builder.watchers:

@@ -74,6 +74,9 @@ class Emitter:
         # how events were translated (set by build_story_mast, used by build_notes).
         self.event_summary: dict[str, int] = {}
         self.event_model: str = "hybrid"
+        # AMD reveal graph: (flag_name, numeric-value-key) pairs whose set_variable should
+        # also emit a phase signal (populated by the AMD target's reveal-graph pass).
+        self.phase_signals: set[tuple[str, str]] = set()
 
     def _art(self, n: XmlNode, default: str) -> str:
         """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),
@@ -219,11 +222,17 @@ class Emitter:
 
     def c_set_variable(self, n: XmlNode) -> list[str]:
         # shared so concurrent independent-event tasks can read the flag
-        name = _pyname(n.get("name"))
+        raw = n.get("name")
+        name = _pyname(raw)
         out = [f"    shared {name} = {_value(n.get('value', '0'))}"]
         # if a //signal route listens on this flag, fire the signal too (push)
         if name in self.signal_flags:
             out.append(f'    signal_emit("a2x_flag_{name}")')
+        # AMD reveal graph: when this set reaches a tracked phase value, fire its phase
+        # signal so the phase route can reveal + start the quests gated on that phase.
+        vkey = _num_key(n.get("value"))
+        if vkey is not None and (raw, vkey) in self.phase_signals:
+            out.append(f'    signal_emit("{_phase_sig_name(raw, vkey)}")')
         return out
 
     def c_set_timer(self, n: XmlNode) -> list[str]:
@@ -520,6 +529,21 @@ def _pyname(name: str) -> str:
     if out and out[0].isdigit():
         out = "_" + out
     return out or "var"
+
+
+def _num_key(v: str | None) -> str | None:
+    """A canonical numeric key for a 2.8 value (``2`` / ``2.0`` -> ``2.0``); None if the
+    value is not a plain number (e.g. an expression like ``Tonnage+20``)."""
+    v = (v or "").strip()
+    try:
+        return str(float(v))
+    except ValueError:
+        return None
+
+
+def _phase_sig_name(name: str, vkey: str) -> str:
+    """The signal name for an AMD phase gate (a flag reaching a numeric value)."""
+    return f"a2x_phase_{_pyname(name)}_{vkey.replace('-', 'm').replace('.', '_')}"
 
 
 _COMMAND_EMIT = {

@@ -208,12 +208,18 @@ text) — to a quest:
 
 Corpus effect: quests **150 → 1372**, beats **3324 → 2082**, all 27 still compile.
 
+**Reveal graph (implemented).** A watcher-backed objective gated on exactly one
+`F == v` becomes `State: secret` when a *later* event (not `<start>`) sets `F = v`: its
+watcher is left out of the up-front schedule, and a `//signal/a2x_phase_F_v` route
+`quest_reveal`s the quest + `task_schedule`s its watcher when the phase is reached. The
+phase signal is emitted from `c_set_variable` wherever that flag is set (a body / beat /
+another quest). So a wave-2 pirate's kill-quest stays hidden and dormant until wave 2
+spawns, then appears in the log with its watcher live. Corpus: **241 quests reveal at
+their phase; 203/929 watchers no longer poll from t=0** (Cruiser 148/230 = 64%).
+Multi-gate / start-produced / unproduced gates stay active from the start (correctness
+over cleverness).
+
 **Caveats / next refinements (known):**
-- **Watcher volume.** Phase-gated objectives each get a polling watcher — ~929 across
-  the corpus (Cruiser alone ~230). The fix is a **reveal graph**: make a downstream
-  quest `State: secret` and have its phase-setter `Then: reveal` it, so its watcher
-  only runs once the phase is reached (most watchers are dormant instead of all polling
-  at once). Not yet built.
 - **Friendly-target kills.** `if_not_exists <friendly base>` becomes `Goal: destroy 1
   <base>` even when destroying it is a **penalty/loss** (e.g. Cruiser's
   "DS1 Destroyed / Penalty -90 kilotons"). A side-aware pass should route a
