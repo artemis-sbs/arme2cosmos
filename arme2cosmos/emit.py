@@ -65,6 +65,12 @@ _AUTO_PROPS = {
     "pushRadius",
 }
 
+# 2.8 properties documented as non-functional even in Artemis 2.8 -> a faithful port is a
+# no-op. Drop cleanly (a comment, not a TODO): wiring them would add behaviour 2.8 lacked.
+_PROP_NOOP = {
+    "blocksShotFlag": "documented non-functional in Artemis 2.8",
+}
+
 # Tiny starter hull/art crosswalk. The real table is the tool's `artmap`
 # (vesselData.xml <-> shipDataBB.json); these are sensible placeholders so output
 # runs, each flagged in MIGRATION_NOTES.
@@ -381,6 +387,8 @@ class Emitter:
             return [f"    a2x_set_special_bits({var}, {_value(val)})"]
         if var is not None and prop in _AUTO_PROPS:
             return [f'    a2x_set_object_property({var}, "{prop}", {_value(val)})']
+        if prop in _PROP_NOOP:
+            return [f'    # set_object_property {prop}: dropped -- {_PROP_NOOP[prop]}']
         self.note(f"set_object_property {prop}={val} on '{n.get('name','?')}': no "
                   f"confirmed Cosmos mapping yet -- see docs/property_map.md")
         if var is None:
@@ -465,6 +473,8 @@ class Emitter:
         prop, val = n.get("property", "?"), n.get("value", "0")
         if var is not None and prop in _AUTO_PROPS:
             return [f'    a2x_addto_object_property({var}, "{prop}", {_value(val)})']
+        if prop in _PROP_NOOP:
+            return [f'    # addto_object_property {prop}: dropped -- {_PROP_NOOP[prop]}']
         self.note(f"addto_object_property {prop} on '{n.get('name','?')}': "
                   f"unmapped property -- see docs/property_map.md")
         return [f"    # TODO addto_object_property {prop}+={val}: {_xml_repr(n)}"]

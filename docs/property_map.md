@@ -45,7 +45,7 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `currentRealSpeed` (26) | obj | `cur_speed` (space_object attr) | **DONE** | read side: physics-driven current speed; setting is overwritten each tick (effectively read-only) |
 | `pushRadius` (269) | obj | `exclusion_radius` (space_object property) | **DONE** | 2.8 push radius = the object's exclusion / collision radius |
 | `deltaX` (2) | — | velocity; no data_set key | HUMAN | drop? |
-| `blocksShotFlag` (67) | — | no equivalent | HUMAN | |
+| `blocksShotFlag` (76) | — | dropped | **DONE** | 2.8 docs: "supposed to block torpedoes and beams if true, but reportedly does not work." Non-functional in 2.8 itself, so a faithful port is a no-op -- tool drops it as a comment (`_PROP_NOOP`) |
 | `triggersMines` (22) | — | no equivalent | HUMAN | |
 
 ## Shields
@@ -180,7 +180,8 @@ Beyond `set_object_property`, these 2.8 commands are also wired:
   `roll` (radians CW-from-south, needs facing spot-check), `shieldState`, `warpState`,
   `musicObjectMasterVolume`.
 - **HUMAN (no Cosmos key, or "drop"):** `pirateRepWithStations`, `missileStoresProbe`/`Beacon`,
-  `nebulaIsOpaque`, `sensorSetting`, `blocksShotFlag`, `triggersMines`, `deltaX`.
+  `nebulaIsOpaque`, `sensorSetting`, `triggersMines`, `deltaX`.
+- **DROP (documented non-functional in 2.8):** `blocksShotFlag` (a 2.8 no-op).
 
 Confirm a VERIFY row or fill a HUMAN row and it's a one-line addition to the `_PROP` map.
 
