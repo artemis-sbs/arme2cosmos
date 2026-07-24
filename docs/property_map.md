@@ -87,13 +87,26 @@ LM torpedo types (`PShock_NUM`, `Tag_NUM`), and ECM ~ EMP.
 
 ## Ship systems (heat / energy / damage)
 
-2.8 has 8 systems; Cosmos `system_cur_heat` / `system_damage` are arrays indexed by a
-smaller set (`eng_control_type_index` is 0-3). The 8->4 index mapping needs you.
+2.8 has 8 systems; Cosmos tracks **4** (`sbs.SHPSYS`: `WEAPONS`=0, `ENGINES`=1,
+`SENSORS`=2, `SHIELDS`=3), each with a heat and a coolant slot -- so the 2.8 8-system
+heat/coolant becomes **4 heats + 4 coolant**, all `data_set` arrays indexed 0..3:
+
+- **heat** -> `system_cur_heat` [0..3] (0.0-1.0)
+- **coolant** -> `system_coolant_used` [0..3] (with `system_coolant_available` /
+  `system_coolant_setting` alongside)
+- **damage** -> `system_damage` [0..3]
+
+The 8->4 collapse (same shape as the grid-damage `_GRID_SYS` map): Beam/Torpedo ->
+`WEAPONS`; Impulse/Turning/Warp -> `ENGINES`; Tactical/Sensors -> `SENSORS`;
+Front/Back Shield -> `SHIELDS`. NOTE: heat is Cosmos's engineering **over-power** model
+(driven by `eng_control_value` + `system_coolant_used`), so a 2.8 heat value must be
+normalized to 0..1 and a written value is transient (the engine recomputes it from
+overpower/coolant).
 
 | 2.8 property | Target | Cosmos | Status | Notes |
 |---|---|---|---|---|
 | `energy` (49) | data_set | `energy` | **DONE** | |
-| `systemCurHeat*` (~41 ea) | data_set | `system_cur_heat` [idx] | VERIFY | need 2.8 system -> Cosmos index |
+| `systemCurHeat*` (8 systems, ~41 ea) | data_set | `system_cur_heat` [SHPSYS 0..3] | VERIFY | index per the 8->4 collapse above (Beam/Torpedo->0, Impulse/Turning/Warp->1, Tactical->2, Front/BackShield->3); normalize the 2.8 value to 0..1. No `systemCurCoolant*` in the a28 corpus |
 | `systemDamageImpulse` (13) | data_set | `system_damage` [idx] | VERIFY | impulse system |
 | `systemDamageTurning` (6) | data_set | `system_damage` [idx] | VERIFY | turning / maneuver system |
 | `warpState` (58) | data_set | `warp_drive_active` (flag) | VERIFY | 2.8 had a level; Cosmos has 0/1 |
