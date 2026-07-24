@@ -644,15 +644,18 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
         L.append("    ->END")
         L.append("")
 
-    # escape-hatch watchers: poll a non-verb condition, emit the quest's `When:` signal.
+    # escape-hatch watchers: poll a non-verb condition, then advance the quest whose
+    # `When: signal a2x_<gl>` (on_signal) matches. The LM quest_driver dispatches
+    # on_signal via //shared/signal/quest_signal reading SIGNAL_NAME -- so the trigger
+    # is signal_emit("quest_signal", {SIGNAL_NAME: ...}), NOT a bare signal_emit.
     for gl, conds in builder.watchers:
-        L.append(f"=== {gl}   # escape hatch -> signal a2x_{gl}")
+        L.append(f"=== {gl}   # escape hatch -> quest_signal a2x_{gl}")
         bools = [b for b in (_cond_bool(em, c) for c in conds) if b]
         L.append(f"---{gl}_loop")
         L.append("    await delay_sim(0.5)")
         if bools:
             L.append(f"    jump {gl}_loop if not ({' and '.join(bools)})")
-        L.append(f'    signal_emit("a2x_{gl}")')
+        L.append(f'    signal_emit("quest_signal", {{"SIGNAL_NAME": "a2x_{gl}"}})')
         L.append("    ->END")
         L.append("")
 
