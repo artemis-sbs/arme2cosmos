@@ -40,9 +40,9 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `turnRate` (90) | data_set | `turn_rate` | **DONE** | FIXED: was `turnRate` (dead key the engine never reads); the steering physics (NPC + player) reads `turn_rate` |
 | `throttle` (9) | data_set | `throttle` | **DONE** | |
 | `artScale` (89) | data_set | `local_scale_coeff` | **DONE** | |
-| `angle` (137) | engine | heading (radians) -> engine_object orientation | VERIFY | which engine attr sets heading? |
-| `pitch` (13) | engine | engine_object orientation | VERIFY | |
-| `roll` (24) | engine | engine_object orientation | VERIFY | |
+| `angle` (137) | quat | yaw quaternion `rot_quat = (cos t/2, 0, sin t/2, 0)` | VERIFY | Mechanics PROVEN (set yaw t -> forward `(sin t, 0, cos t)`); `coords.angle` gives the 2.8->Cosmos mirror. NOT auto-landed: (1) zero-reference 2.8<->Cosmos unverified, (2) NPC AI re-aims immediately so it only matters for stations/un-brained, (3) the mock's a2x objects have no `rot_quat` so it isn't mock-testable end-to-end. Land behind a real-engine facing spot-check. |
+| `pitch` (13) | quat | orientation quaternion | VERIFY | same as `angle`; needs euler composition (yaw+pitch+roll can't each overwrite the quat) |
+| `roll` (24) | quat | orientation quaternion | VERIFY | same as `angle` |
 | `topSpeed` (564) | data_set | `speed_coeff` (0-1) | **DONE** | PROVEN behaviorally vs the mock engine physics: NPC cruise = throttle x 36 u/s x speed_coeff (1.0/0.5/0.25 -> 36/18/9). 2.8 topSpeed values are already 0-1 coeffs (1:1). **NPC-only** -- Cosmos player top speed is fixed (playerThrottle x 180, no speed_coeff), so on a player it's a harmless no-op (0 corpus sites use player_slot) |
 | `currentRealSpeed` (26) | obj | `cur_speed` (space_object attr) | **DONE** | read side: physics-driven current speed; setting is overwritten each tick (effectively read-only) |
 | `pushRadius` (269) | — | no key found (`exclusion_radius`?) | HUMAN | |
