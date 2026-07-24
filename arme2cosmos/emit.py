@@ -45,7 +45,15 @@ _ELITE_ABILITIES = {"Stealth", "LowVis", "Drones", "AntiMine", "AntiTorp",
 _FLEET_COEFF = {"nonPlayerSpeed", "nonPlayerShield", "nonPlayerWeapon",
                 "playerShields", "playerWeapon"}
 
+# 2.8's 8 named engineering systems (a2x collapses these 8 -> Cosmos's 4 SHPSYS slots).
+_SHPSYS_NAMES = ("Beam", "Torpedo", "Turning", "Impulse", "Warp", "Tactical",
+                 "FrontShield", "BackShield")
+
 _AUTO_PROPS = {
+    "surrenderChance", "tauntImmunityIndex",
+    *(f"systemCurHeat{s}" for s in _SHPSYS_NAMES),
+    *(f"systemDamage{s}" for s in _SHPSYS_NAMES),
+    *(f"systemCurEnergy{s}" for s in _SHPSYS_NAMES),
     "positionX", "positionY", "positionZ",
     "topSpeed", "currentRealSpeed",
     "angleDelta", "rollDelta", "pitchDelta", "turnRate", "throttle", "artScale",

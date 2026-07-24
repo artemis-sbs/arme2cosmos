@@ -104,11 +104,10 @@ overpower/coolant).
 | 2.8 property | Target | Cosmos | Status | Notes |
 |---|---|---|---|---|
 | `energy` (49) | data_set | `energy` | **DONE** | |
-| `systemCurHeat*` (8 systems, ~41 ea) | data_set | `system_cur_heat` [SHPSYS 0..3] | VERIFY | index per the 8->4 collapse above (Beam/Torpedo->0, Impulse/Turning/Warp->1, Tactical->2, Front/BackShield->3); normalize the 2.8 value to 0..1. No `systemCurCoolant*` in the a28 corpus |
-| `systemDamageImpulse` (13) | data_set | `system_damage` [idx] | VERIFY | impulse system |
-| `systemDamageTurning` (6) | data_set | `system_damage` [idx] | VERIFY | turning / maneuver system |
+| `systemCurHeat*` (8 systems, ~41 ea) | data_set | `system_cur_heat` [SHPSYS 0..3] | **DONE** | a2x `_SHPSYS` 8->4 collapse (Beam/Torpedo->WEAPONS 0, Impulse/Turning/Warp->ENGINES 1, Tactical->SENSORS 2, Front/BackShield->SHIELDS 3). Lossy: systems sharing a slot overwrite (later-write-wins). No `systemCurCoolant*` in the a28 corpus |
+| `systemDamage*` (Impulse 13, Turning 6) | data_set | `system_damage` [idx] | **DONE** | same 8->4 collapse; damaged-node count per SHPSYS |
 | `warpState` (58) | data_set | player warp level | VERIFY | WIKI: 0-4 current warp speed (jump ships always 0). Cosmos: playerThrottle>1 = warp (1..5) -- map 0-4 onto that |
-| `systemCurEnergy*` (8 systems, ~32 ea) | data_set | `eng_control_value` [per control] | VERIFY | WIKI: **0.0-1.0** = the Engineering console power slider per system (Beam/Torpedo/Sensors/Maneuver/Impulse/Warp/FrontShld/RearShld). Cosmos over-power goes 0..3 (300%), so 2.8 0-1 maps to the 0-100% part; index via the 8->4 SHPSYS collapse |
+| `systemCurEnergy*` (8 systems, ~32 ea) | data_set | `eng_control_value` [SHPSYS 0..3] | **DONE** | 0.0-1.0 Engineering power slider; same 8->4 collapse. NOTE: NPCs don't run the engineering model, so this is a harmless no-op on an NPC (2.8 usually sets it on NPCs anyway) |
 
 ## Enemy AI / elite
 
@@ -116,8 +115,8 @@ overpower/coolant).
 |---|---|---|---|---|
 | `hasSurrendered` (328) | data_set | `surrender_flag` | **DONE** | 0 = not surrendered |
 | `eliteAbilityBits` / `specialAbilityBits` (40) | data_set | `a2x_set_special_bits` | **DONE** | WIKI bit-sum (1=Stealth,2=LowVis,4=Cloak,8=HET,16=Warp,32=Teleport,64=Tractor,128=Drones,256=AntiMine,512=AntiTorp,1024=ShldDrain,2048=ShldVamp,4096=TeleBack,8192=ShldReset) -> each `set_special` |
-| `surrenderChance` (52) | — | script-side calc | HUMAN | WIKI: 0-100 (a %); in Cosmos it's a script calculation, not a data key |
-| `tauntImmunityIndex` (24) | — | no key | HUMAN | WIKI: 0, 1, or 2 |
+| `surrenderChance` (52) | inventory | `a2x_surrender_chance` | **DONE** | WIKI: 0-100 (a %). a2x writes it to the object inventory; the LM damage/comms addon reads it to decide surrender (a2x carries no LM import -- LM-side read is the follow-up) |
+| `tauntImmunityIndex` (24) | inventory | `a2x_taunt_immunity` | **DONE** | WIKI: 0 none / 1 temp / 2 perm. a2x writes it to the object inventory; LM taunt logic reads it (LM-side read is the follow-up) |
 | `age` (19) | — | LM monster age system | VERIFY | monsters have an age system now (LM prefabs: `monster_roll_age` / `monster_bake_age` + stage roles) -- map to that, not a raw key |
 
 ## Side / identity
@@ -174,12 +173,13 @@ Beyond `set_object_property`, these 2.8 commands are also wired:
   `sideValue` (-> `a2x_set_side_value`), `eliteAbilityBits`/`specialAbilityBits`
   (-> `a2x_set_special_bits`) -- plus the `addto` / `copy` / `set_ship_text` /
   `set_relative_position` / `set_special` commands.
+- **DONE this pass:** the `systemCurHeat*`/`systemCurEnergy*`/`systemDamage*` indexed writes
+  (8->4 SHPSYS collapse), and `surrenderChance`/`tauntImmunityIndex` (-> object inventory,
+  LM reads them).
 - **VERIFY (key known / ready to wire):** monster `age` (-> LM age system), `angle`/`pitch`/
-  `roll` (radians CW-from-south, needs facing spot-check), `shieldState`, the
-  `systemCurHeat*`/`systemCurEnergy*`/`systemDamage*` indexed writes (8->4 SHPSYS collapse),
-  `warpState`, `musicObjectMasterVolume`.
-- **HUMAN (no Cosmos key, or "drop"):** `surrenderChance` (script-side calc),
-  `tauntImmunityIndex`, `pirateRepWithStations`, `missileStoresProbe`/`Beacon`,
+  `roll` (radians CW-from-south, needs facing spot-check), `shieldState`, `warpState`,
+  `musicObjectMasterVolume`.
+- **HUMAN (no Cosmos key, or "drop"):** `pirateRepWithStations`, `missileStoresProbe`/`Beacon`,
   `nebulaIsOpaque`, `sensorSetting`, `blocksShotFlag`, `triggersMines`, `deltaX`.
 
 Confirm a VERIFY row or fill a HUMAN row and it's a one-line addition to the `_PROP` map.
