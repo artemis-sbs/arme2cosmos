@@ -56,6 +56,11 @@ _GRID_SYS = {
     "systemFrontShield": "SHIELDS", "systemBackShield": "SHIELDS",
 }
 
+# 2.8 monsterType -> an LM monster prefab (spawned via prefab_spawn). Only the confident
+# ones; classic(0)/tube(5)/jelly(7)/derelict(8) stay on the a2x_create_monster placeholder.
+# whale->grazer (Cosmos has no space whale; the LM grazer is its placid stand-in).
+_MONSTER_PREFAB = {1: "grazer", 2: "shark", 3: "dragon", 4: "piranha", 6: "insect"}
+
 _STATION_ART = "starbase_command"
 _ENEMY_ART = "kralien_cruiser"
 _NEUTRAL_ART = "transport"
@@ -90,6 +95,9 @@ class Emitter:
         self.hails: dict[str, str] = {}
         self.hail_done: set[str] = set()  # objects already given their stored hail value
         self.wait_prop_n = 0  # unique-label counter for if_object_property poll waits
+        # 2.8 object names referenced by a later command/condition (not the create) -- a
+        # monster with a referenced name needs the capturable path, not a prefab_spawn.
+        self.referenced_names: set[str] = set()
 
     def _art(self, n: XmlNode, default: str) -> str:
         """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),
@@ -196,8 +204,19 @@ class Emitter:
     def c_monster(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
         mt = n.get("monsterType", "0")
-        self.note(f"monster type {mt}: placeholder art + creature_ role (real art only "
-                  f"for classic/derelict)")
+        name = n.get("name")
+        prefab = _MONSTER_PREFAB.get(int(mt)) if (mt or "").strip().lstrip("-").isdigit() else None
+        # A real LM monster prototype (with its own brain + age) when the type maps to one
+        # AND the object isn't referenced later -- prefab_spawn returns a task, not a
+        # capturable object id, so referenced monsters keep the capturable placeholder path.
+        if prefab and (not name or name not in self.referenced_names):
+            self.addons.add("prefabs")
+            nm = f', "NAME": "{_mast_str(name)}"' if name else ""
+            return [f'    prefab_spawn(prefab_{prefab}, {{"START_X": a2x_pos({x}, {y}, {z}).x, '
+                    f'"START_Y": a2x_pos({x}, {y}, {z}).y, '
+                    f'"START_Z": a2x_pos({x}, {y}, {z}).z{nm}}})']
+        self.note(f"monster type {mt}: placeholder art + creature_ role (no LM prefab for "
+                  f"this type, or the object is referenced later so it needs the capturable path)")
         return [self._assign(n, f'a2x_create_monster({x}, {y}, {z}, '
                 f'monster_type={mt}{self._name_kw(n)})')]
 

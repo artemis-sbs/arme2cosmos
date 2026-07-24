@@ -237,6 +237,21 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     return "\n".join(lines) + "\n"
 
 
+def _prescan_references(mission: Mission, em: Emitter) -> None:
+    """Collect the object names a NON-create node references (name / name1 / name2 /
+    objectName / targetName). A monster whose name is referenced later needs the capturable
+    a2x_create_monster path (prefab_spawn returns a task, not a grabbable object id)."""
+    ref: set[str] = set()
+    for n in mission.all_nodes():
+        if n.tag == "create":
+            continue
+        for k in ("name", "name1", "name2", "objectName", "targetName"):
+            v = n.get(k)
+            if v:
+                ref.add(v)
+    em.referenced_names = ref
+
+
 def _prescan_scan_hail(mission: Mission, em: Emitter) -> None:
     """Populate em.scans / em.hails from set_ship_text so the science-scan load call and
     the Hail route are emitted even when the set_ship_text lives in an event body."""
@@ -569,6 +584,7 @@ def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSIO
     """
     mission = parse_file(path)
     em = Emitter(mission, hullmap=hullmap)
+    _prescan_references(mission, em)  # names used later -> keep those monsters capturable
 
     if target == "amd":
         from .amd_emit import build_amd_target
