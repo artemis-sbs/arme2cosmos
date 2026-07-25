@@ -70,6 +70,7 @@ _AUTO_PROPS = {
     "pirateRepWithStations", "pirateRepWithStation",
     "age",             # kept on inventory (a2x_age) for science flavor
     "nebulaIsOpaque",  # -> nebula max_throttle (opaque slows ships, 0 = no limit)
+    "sensorSetting",   # -> ship_base_scan_range (0 = unlimited; N = 100/(3N) km)
 }
 
 # 2.8 properties documented as non-functional even in Artemis 2.8 -> a faithful port is a
@@ -455,6 +456,9 @@ class Emitter:
         # (non-zero = opaque = slows ships; 0 = no limit)
         if n.get("name") is None and prop == "nebulaIsOpaque":
             return [f'    a2x_set_nebula_opaque_all({_value(val)})']
+        # nameless sensorSetting -> global: set every player ship's scan range
+        if n.get("name") is None and prop == "sensorSetting":
+            return [f'    a2x_set_sensor_setting_all({_value(val)})']
         # sideValue as a property reuses the side-role reassignment (1=enemy / 2=friendly)
         if var is not None and prop in ("sideValue", "SideValue"):
             return [f"    a2x_set_side_value({var}, {_value(val)})"]
@@ -677,6 +681,13 @@ class Emitter:
             return [f"    # TODO set_damcon_members: {_xml_repr(n)}"]
         return [f'    a2x_set_damcon_members({ship}, {_value(n.get("team_index", "0"))}, {_value(n.get("value", "0"))})']
 
+    def c_gm_instructions(self, n: XmlNode) -> list[str]:
+        # 2.8 GM briefing text -> the LM GM console instruction panel (GAMEMASTER_INSTRUCTIONS).
+        self.addons.update({"gamemaster", "gamemaster_comms"})
+        title = n.get("title", "")
+        body = " ".join(ln.strip() for ln in (n.text or "").split("\n")).strip()
+        return [f'    a2x_set_gm_instructions("{_mast_str(title)}", "{_mast_str(body)}")']
+
     def c_set_skybox_index(self, n: XmlNode) -> list[str]:
         # 2.8 SB00..SB29 -> a Cosmos skybox. Cosmos has no SB## art; a2x maps the index
         # across the LM basic_random_skybox media labels (@media/skybox/*), so feature-detect
@@ -834,6 +845,7 @@ _COMMAND_EMIT = {
     "set_special": Emitter.c_set_special,
     "set_skybox_index": Emitter.c_set_skybox_index,
     "set_damcon_members": Emitter.c_set_damcon_members,
+    "gm_instructions": Emitter.c_gm_instructions,
     "set_player_carried_type": Emitter.c_set_player_carried_type,
     "set_player_station_carried": Emitter.c_set_player_station_carried,
     "set_side_value": Emitter.c_set_side_value,
