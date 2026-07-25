@@ -75,6 +75,8 @@ _AUTO_PROPS = {
     "age",             # kept on inventory (a2x_age) for science flavor
     "nebulaIsOpaque",  # -> nebula max_throttle (opaque slows ships, 0 = no limit)
     "sensorSetting",   # -> ship_base_scan_range (0 = unlimited; N = 100/(3N) km)
+    "warpState",       # really the throttle: 0-4 -> throttle 1-5
+    "canBuild",        # -> a2x_can_build inventory (LM build console reads it)
 }
 
 # 2.8 properties documented as non-functional even in Artemis 2.8 -> a faithful port is a
@@ -96,6 +98,12 @@ _PROP_ENGINE_STUB = {
     # the hit, so there is no clean per-object mine-immunity hook. Needs an engine feature.
     "triggersMines": "no Cosmos per-object mine-immunity -- needs an engine change "
                      "(2.8 triggersMines=0 = not damaged by mines)",
+    # 2.8 deltaX/Y/Z = an object's per-axis velocity (drift). Cosmos exposes only cur_speed
+    # (a scalar along the heading), no free velocity vector, so a per-axis drift has no clean
+    # mapping -- needs an engine velocity-vector setter.
+    "deltaX": "no Cosmos free-velocity vector -- needs an engine change (2.8 deltaX = X drift rate)",
+    "deltaY": "no Cosmos free-velocity vector -- needs an engine change (2.8 deltaY = Y drift rate)",
+    "deltaZ": "no Cosmos free-velocity vector -- needs an engine change (2.8 deltaZ = Z drift rate)",
 }
 
 # Tiny starter hull/art crosswalk. The real table is the tool's `artmap`
