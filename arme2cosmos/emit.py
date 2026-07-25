@@ -59,7 +59,9 @@ _AUTO_PROPS = {
     "topSpeed", "currentRealSpeed",
     "angle",  # absolute facing (yaw); a2x maps 2.8 radians -> Cosmos rot_quat (pi - angle)
     "angleDelta", "rollDelta", "pitchDelta", "turnRate", "throttle", "artScale",
-    "energy", "hasSurrendered", "shieldsOn", "shieldStateFront", "shieldStateBack",
+    "energy", "hasSurrendered", "shieldsOn",
+    "shieldState",  # station single shield -> shield_val[0]
+    "shieldStateFront", "shieldStateBack",
     "shieldMaxStateFront", "shieldMaxStateBack", "missileStoresNuke",
     "missileStoresHoming", "missileStoresMine", "missileStoresEMP", "countNuke",
     "countHoming", "countMine", "countEMP",
