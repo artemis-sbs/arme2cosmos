@@ -20,7 +20,8 @@ _SIDE = {"0": "neutral", "1": "enemy", "2": "friendly"}
 # 2.8 add_ai block types that a2x_add_ai maps to a real brain (mirror of a2x.ai).
 # Others emit the call but a2x_add_ai is a no-op for them -> flagged in notes.
 _AI_MAPPED = {"CHASE_PLAYER", "CHASE_STATION", "CHASE_AI_SHIP", "CHASE_NEUTRAL",
-              "ATTACK", "TARGET_THROTTLE", "CHASE_FLEET"}
+              "ATTACK", "TARGET_THROTTLE", "CHASE_FLEET", "CHASE_ANGER",
+              "PROCEED_TO_EXIT"}
 
 # 2.8 AI blocks Cosmos handles structurally differently (or not at all) -> drop cleanly
 # rather than leave a TODO. Value is the reason emitted as a one-line comment.
