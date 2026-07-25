@@ -398,11 +398,14 @@ class Emitter:
 
     def c_destroy(self, n: XmlNode) -> list[str]:
         var = self.symbols.get(n.get("name")) or self._gm_selected(n)
-        if var is None:
-            self.note(f"destroy '{n.get('name')}' references object not captured "
-                      f"(forward ref / gm-selected / player_slot) -- wire by hand")
-            return [f'    # TODO destroy "{n.get("name")}"']
-        return [f"    a2x_destroy({var})"]
+        if var is not None:
+            return [f"    a2x_destroy({var})"]
+        name = n.get("name")
+        if name:
+            # no create the tool saw (dynamically created, or a dead reference in the 2.8
+            # mission) -> destroy by name at runtime; a no-op if the object never existed.
+            return [f'    a2x_destroy_named("{_mast_str(name)}")']
+        return [f"    # TODO destroy: {_xml_repr(n)}"]
 
     def c_destroy_near(self, n: XmlNode) -> list[str]:
         kind = n.get("type", "all")
