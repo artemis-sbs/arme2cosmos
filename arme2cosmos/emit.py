@@ -527,6 +527,26 @@ class Emitter:
             out.append(f"    # set_ship_text (no mappable fields): {_xml_repr(n)}")
         return out
 
+    def c_set_player_carried_type(self, n: XmlNode) -> list[str]:
+        # 2.8 stows a craft in a numbered hangar bay; Cosmos has no bays -- just spawn a craft
+        # of the right variant into the player's hangar (LM hangar_random_craft_spawn spawns it
+        # AND associates it with the ship). bay_slot / craft name are dropped.
+        ship = self.player_var
+        if ship is None:
+            return [f"    # TODO set_player_carried_type (no player ship): {_xml_repr(n)}"]
+        self.addons.add("hangar")
+        return [f'    hangar_random_craft_spawn({ship}, "{_craft_variant(n.get("hullKeys"))}")']
+
+    def c_set_player_station_carried(self, n: XmlNode) -> list[str]:
+        # station-carried craft -> spawn the variant into the station's hangar.
+        ship = self.symbols.get(n.get("name"))
+        if ship is None:
+            self.note(f"set_player_station_carried on station '{n.get('name')}' not captured "
+                      f"-- wire by hand")
+            return [f"    # TODO set_player_station_carried: {_xml_repr(n)}"]
+        self.addons.add("hangar")
+        return [f'    hangar_random_craft_spawn({ship}, "{_craft_variant(n.get("hullKeys"))}")']
+
     def c_set_special(self, n: XmlNode) -> list[str]:
         # the ship: a captured named object, a player_slot, or (GM-button handlers
         # with no name) the comms-selected ship.
@@ -682,6 +702,8 @@ _COMMAND_EMIT = {
     "play_sound_now": Emitter.c_play_sound,
     "set_player_grid_damage": Emitter.c_grid_damage,
     "set_special": Emitter.c_set_special,
+    "set_player_carried_type": Emitter.c_set_player_carried_type,
+    "set_player_station_carried": Emitter.c_set_player_station_carried,
     "set_side_value": Emitter.c_set_side_value,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
@@ -697,6 +719,16 @@ _LESS_CMP = {"<", "<=", "LESS", "LESS_EQUAL", "EQUALS", "="}
 def _is_less(comparator: str) -> bool:
     """2.8 distance comparator -> True if the wait is 'until closer than value'."""
     return (comparator or "").strip() in _LESS_CMP
+
+
+def _craft_variant(hull_keys: str | None) -> str:
+    """2.8 hullKeys -> Cosmos hangar craft variant (fighter | bomber | shuttle)."""
+    h = (hull_keys or "").lower()
+    if "bomber" in h:
+        return "bomber"
+    if "shuttle" in h:
+        return "shuttle"
+    return "fighter"
 
 
 def _resolve_obj(em: Emitter, name: str | None, slot: str | None) -> str:

@@ -128,6 +128,23 @@ class ConvertTests(unittest.TestCase):
         a = em.c_addto_object_property(XmlNode("addto_object_property", {"property": "countEMP", "value": "2", "player_slot": "0"}))
         self.assertEqual(a, ['    a2x_addto_object_property(player_ship, "countEMP", 2)'])
 
+    def test_player_carried_type_maps_to_hangar_craft(self):
+        # 2.8 set_player_carried_type (bay of a fighter/bomber/shuttle) -> LM hangar_random_
+        # craft_spawn of that variant (no bays; it spawns + associates with the ship).
+        from arme2cosmos.emit import Emitter
+        from arme2cosmos.model import XmlNode
+        em = Emitter.__new__(Emitter)
+        em.notes = []
+        em.addons = set()
+        em.symbols = {}
+        em.player_var = "player_ship"
+        out = em.c_set_player_carried_type(XmlNode("set_player_carried_type", {"player_slot": "0", "bay_slot": "0", "hullKeys": "singleseat TSN Bomber", "name": "Badger"}))
+        self.assertEqual(out, ['    hangar_random_craft_spawn(player_ship, "bomber")'])
+        self.assertIn("hangar", em.addons)
+        em.symbols["Beachwood"] = "obj_beachwood"
+        out2 = em.c_set_player_station_carried(XmlNode("set_player_station_carried", {"name": "Beachwood", "hullKeys": "singleseat fighter"}))
+        self.assertEqual(out2, ['    hangar_random_craft_spawn(obj_beachwood, "fighter")'])
+
     def test_anomaly_pulls_upgrades_addon(self):
         _, _, sjson = self._convert()
         self.assertIn("upgrades", sjson)
