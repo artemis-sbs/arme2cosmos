@@ -152,13 +152,47 @@ def _terminal_flags(mission: Mission) -> set[str]:
     return flags
 
 
-def _is_decider(ev: Event, terminal: set[str]) -> bool:
-    """An event that SETS a terminal flag truthy (a win/lose deciding event), and is not
-    itself the ``end_mission`` terminal."""
+def _terminal_gates(mission: Mission) -> list[tuple]:
+    """The ``(flag, comparator, value)`` conditions that gate an ``end_mission`` -- the flag
+    VALUES that actually end the mission. A real decider must drive one of these true (a
+    phase counter that merely advances -- e.g. Event1=3 when the end needs Event1>=19 -- is
+    setup, not a decider)."""
+    gates: list[tuple] = []
+    for ev in mission.events:
+        if any(c.tag == "end_mission" for c in ev.commands):
+            for c in ev.conditions:
+                if c.tag == "if_variable" and c.get("name"):
+                    gates.append((c.get("name"), c.get("comparator", "EQUALS"), c.get("value")))
+    return gates
+
+
+def _satisfies(comparator: str, set_val, gate_val) -> bool:
+    """Does setting a flag to ``set_val`` satisfy a ``comparator gate_val`` end gate?"""
+    try:
+        s, g = float(set_val), float(gate_val)
+    except (TypeError, ValueError):
+        return str(set_val) == str(gate_val)
+    return {
+        "EQUALS": s == g, "NOT_EQUALS": s != g,
+        "GREATER": s > g, "GREATER_EQUAL": s >= g,
+        "LESS": s < g, "LESS_EQUAL": s <= g,
+    }.get(comparator or "EQUALS", s == g)
+
+
+def _is_decider(ev: Event, gates: list[tuple]) -> bool:
+    """An event that drives a terminal end-gate true (a win/lose deciding event), and is not
+    itself the ``end_mission`` terminal. Only counts a set_variable that SATISFIES the gate's
+    value -- so a phase counter merely advancing (Event1=3 vs end at Event1>=19) is not a
+    decider."""
     if any(c.tag == "end_mission" for c in ev.commands):
         return False
-    return any(c.tag == "set_variable" and c.get("name") in terminal
-               and _truthy(c.get("value")) for c in ev.commands)
+    for c in ev.commands:
+        if c.tag != "set_variable":
+            continue
+        for name, comp, val in gates:
+            if c.get("name") == name and _satisfies(comp, c.get("value"), val):
+                return True
+    return False
 
 
 def _classify_outcome(ev: Event) -> str | None:
@@ -299,7 +333,8 @@ class AmdBuilder:
         return consumed
 
     def build(self) -> None:
-        terminal = _terminal_flags(self.mission)
+        terminal = _terminal_flags(self.mission)   # names -> self-guard drop in _trigger_for
+        gates = _terminal_gates(self.mission)      # value-specific -> real end-deciders only
         used_ids: set = set()
         chained = self._extract_timed_chains(used_ids)  # all timed reveal chains
         for ev in self.events:
@@ -307,7 +342,7 @@ class AmdBuilder:
                 continue  # already emitted as a reveal-chain quest
             if any(c.tag == "end_mission" for c in ev.commands) and not _is_decider(ev, terminal):
                 continue  # the bare end_mission terminal is absorbed into Win:/Lose:
-            if _is_decider(ev, terminal):
+            if _is_decider(ev, gates):
                 key = _quest_key(ev, used_ids)
                 q = Quest(key, ev.name or key)
                 self._trigger_for(q, ev, terminal)
