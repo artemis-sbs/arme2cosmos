@@ -625,9 +625,11 @@ class Emitter:
         return out
 
     def c_set_player_carried_type(self, n: XmlNode) -> list[str]:
-        # 2.8 stows a craft in a numbered hangar bay; Cosmos has no bays -- just spawn a craft
-        # of the right variant into the player's hangar (LM hangar_random_craft_spawn spawns it
-        # AND associates it with the ship). bay_slot / craft name are dropped.
+        # 2.8 stows a craft in a numbered hangar bay; Cosmos has no bays -- spawn a craft of
+        # the right variant into the player's hangar (LM hangar_random_craft_spawn spawns it
+        # AND associates it with the ship). bay_slot is dropped. The craft is a real spawned
+        # object, so CAPTURE it under its 2.8 name (and name it) when that name is referenced
+        # elsewhere -- so set_relative_position / if_distance / add_ai targetName resolve.
         ship = self.player_var
         if ship is None and n.get("player_slot") is not None:
             # no explicit create:player -> resolve the 2.8 slot to the runtime player-ship ID
@@ -635,7 +637,13 @@ class Emitter:
         if ship is None:
             return [f"    # TODO set_player_carried_type (no player ship): {_xml_repr(n)}"]
         self.addons.add("hangar")
-        return [f'    hangar_random_craft_spawn({ship}, "{_craft_variant(n.get("hullKeys"))}")']
+        variant = _craft_variant(n.get("hullKeys"))
+        var = self.symbols.get(n.get("name"))
+        if var is not None:
+            # capture the spawned craft under its 2.8 name so later references resolve
+            # (the binding is the symbol; the Cosmos-assigned display name is kept).
+            return [f'    shared {var} = to_id(hangar_random_craft_spawn({ship}, "{variant}"))']
+        return [f'    hangar_random_craft_spawn({ship}, "{variant}")']
 
     def c_set_player_station_carried(self, n: XmlNode) -> list[str]:
         # station-carried craft -> spawn the variant into the station's hangar.

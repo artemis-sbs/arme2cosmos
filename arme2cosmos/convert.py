@@ -323,6 +323,12 @@ def _prescan_named_objects(mission: Mission, em: Emitter) -> None:
             em.symbols.setdefault(name, "player_ship")
         elif kind in _CAPTURED_CREATES:
             em._var_for(name)
+    # 2.8 named carried craft (set_player_carried_type) are real spawned hangar objects --
+    # capture their names too, so later references (set_relative_position / if_distance /
+    # add_ai targetName) resolve to the spawned craft.
+    for n in mission.all_nodes():
+        if n.tag == "set_player_carried_type" and n.get("name"):
+            em._var_for(n.get("name"))
 
 
 def _truthy(v: str) -> bool:
