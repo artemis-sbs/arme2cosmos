@@ -681,6 +681,14 @@ class Emitter:
             return [f"    # TODO set_damcon_members: {_xml_repr(n)}"]
         return [f'    a2x_set_damcon_members({ship}, {_value(n.get("team_index", "0"))}, {_value(n.get("value", "0"))})']
 
+    def c_set_to_gm_position(self, n: XmlNode) -> list[str]:
+        # move the GM-selected object to the GM position (the gamemaster console ship,
+        # COMMS_ORIGIN, which tracks the GM's clicks). Runs in the GM comms tree.
+        obj = self.symbols.get(n.get("name")) or self._gm_selected(n)
+        if obj is None:
+            return [f"    # TODO set_to_gm_position: {_xml_repr(n)}"]
+        return [f"    a2x_set_to_gm_position({obj}, COMMS_ORIGIN_ID)"]
+
     def c_gm_instructions(self, n: XmlNode) -> list[str]:
         # 2.8 GM briefing text -> the LM GM console instruction panel (GAMEMASTER_INSTRUCTIONS).
         self.addons.update({"gamemaster", "gamemaster_comms"})
@@ -846,6 +854,7 @@ _COMMAND_EMIT = {
     "set_skybox_index": Emitter.c_set_skybox_index,
     "set_damcon_members": Emitter.c_set_damcon_members,
     "gm_instructions": Emitter.c_gm_instructions,
+    "set_to_gm_position": Emitter.c_set_to_gm_position,
     "set_player_carried_type": Emitter.c_set_player_carried_type,
     "set_player_station_carried": Emitter.c_set_player_station_carried,
     "set_side_value": Emitter.c_set_side_value,
