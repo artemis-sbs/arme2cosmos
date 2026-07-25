@@ -113,6 +113,21 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(ct, ['    a2x_incoming_comms_text("Hi^there", from_name="Adm")'])
         self.assertIn("comms", em.addons)
 
+    def test_player_slot_property_targets_player_ship(self):
+        # set/addto_object_property on a player_slot (no name) -> the player ship, so mapped
+        # player props (energy / count* / shieldState) are real calls, not lost TODOs.
+        from arme2cosmos.emit import Emitter
+        from arme2cosmos.model import XmlNode
+        em = Emitter.__new__(Emitter)
+        em.notes = []
+        em.addons = set()
+        em.symbols = {}
+        em.player_var = "player_ship"
+        s = em.c_set_object_property(XmlNode("set_object_property", {"property": "energy", "value": "1100", "player_slot": "0"}))
+        self.assertEqual(s, ['    a2x_set_object_property(player_ship, "energy", 1100)'])
+        a = em.c_addto_object_property(XmlNode("addto_object_property", {"property": "countEMP", "value": "2", "player_slot": "0"}))
+        self.assertEqual(a, ['    a2x_addto_object_property(player_ship, "countEMP", 2)'])
+
     def test_anomaly_pulls_upgrades_addon(self):
         _, _, sjson = self._convert()
         self.assertIn("upgrades", sjson)

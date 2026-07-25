@@ -375,6 +375,9 @@ class Emitter:
 
     def c_set_object_property(self, n: XmlNode) -> list[str]:
         var = self.symbols.get(n.get("name"))
+        # player_slot props (energy / count* / shieldState ... on the player) -> the player ship
+        if var is None and n.get("player_slot") is not None:
+            var = self.player_var
         prop, val = n.get("property", "?"), n.get("value", "0")
         # global difficulty knobs (no object name): nonPlayer*/player* -> fleet coeffs
         if n.get("name") is None and prop in _FLEET_COEFF:
@@ -471,6 +474,8 @@ class Emitter:
 
     def c_addto_object_property(self, n: XmlNode) -> list[str]:
         var = self.symbols.get(n.get("name"))
+        if var is None and n.get("player_slot") is not None:
+            var = self.player_var
         prop, val = n.get("property", "?"), n.get("value", "0")
         if var is not None and prop in _AUTO_PROPS:
             return [f'    a2x_addto_object_property({var}, "{prop}", {_value(val)})']
@@ -482,6 +487,10 @@ class Emitter:
 
     def c_copy_object_property(self, n: XmlNode) -> list[str]:
         src, dst = self.symbols.get(n.get("name1")), self.symbols.get(n.get("name2"))
+        if src is None and n.get("player_slot1") is not None:
+            src = self.player_var
+        if dst is None and n.get("player_slot2") is not None:
+            dst = self.player_var
         prop = n.get("property", "?")
         if src is not None and dst is not None and prop in _AUTO_PROPS:
             return [f'    a2x_copy_object_property({src}, {dst}, "{prop}")']
