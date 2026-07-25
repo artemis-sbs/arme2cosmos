@@ -340,6 +340,12 @@ class Emitter:
                     f'    add_role({var}, "friendly")',
                     f'    add_role({var}, "prefab_npc_defender")',
                     f'    set_inventory_value({var}, "give_orders_type", "objective/orders/defender")']
+        # DEFEND: protect its area -> the LM defender setup (prefab_npc_defender role + the
+        # protect-area objective, LM prefabs/defender.mast).
+        if typ == "DEFEND":
+            self.addons.add("prefabs")
+            return [f'    add_role({var}, "prefab_npc_defender")',
+                    f'    objective_add({var}, objective_protect_area)']
         self.addons.add("ai")
         if typ not in _AI_MAPPED:
             self.note(f"add_ai {typ} on '{name}': no Cosmos brain mapping yet "
