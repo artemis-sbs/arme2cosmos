@@ -719,6 +719,17 @@ class Emitter:
             return [f"    # TODO set_to_gm_position: {_xml_repr(n)}"]
         return [f"    a2x_set_to_gm_position({obj}, COMMS_ORIGIN_ID)"]
 
+    def c_set_fleet_property(self, n: XmlNode) -> list[str]:
+        # 2.8 fleet formation config -> the general LM fleet_spacing/fleet_max_radius keys
+        # (a2x resolves the fleet agent for the index). fleetSpacing / fleetMaxRadius only.
+        prop = n.get("property", "?")
+        if prop not in ("fleetSpacing", "fleetMaxRadius"):
+            self.note(f"set_fleet_property {prop}: no Cosmos fleet mapping -- wire by hand")
+            return [f"    # TODO set_fleet_property {prop}: {_xml_repr(n)}"]
+        self.addons.add("fleets")
+        return [f'    a2x_set_fleet_property({_value(n.get("fleetIndex", "0"))}, '
+                f'"{prop}", {_value(n.get("value", "0"))})']
+
     def c_gm_instructions(self, n: XmlNode) -> list[str]:
         # 2.8 GM briefing text -> the LM GM console instruction panel (GAMEMASTER_INSTRUCTIONS).
         self.addons.update({"gamemaster", "gamemaster_comms"})
@@ -885,6 +896,7 @@ _COMMAND_EMIT = {
     "set_damcon_members": Emitter.c_set_damcon_members,
     "gm_instructions": Emitter.c_gm_instructions,
     "set_to_gm_position": Emitter.c_set_to_gm_position,
+    "set_fleet_property": Emitter.c_set_fleet_property,
     "set_player_carried_type": Emitter.c_set_player_carried_type,
     "set_player_station_carried": Emitter.c_set_player_station_carried,
     "clear_player_station_carried": Emitter.c_clear_player_station_carried,
