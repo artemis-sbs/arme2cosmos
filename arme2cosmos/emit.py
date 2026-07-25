@@ -936,7 +936,9 @@ def _resolve_obj(em: Emitter, name: str | None, slot: str | None) -> str:
         return em.symbols[name]
     if slot is not None or name is None:
         return em.player_var or 'role("__player__")'
-    return em.symbols.get(name) or f'role("{name}")'  # unknown -> best-effort role
+    # unknown name -> a runtime name->id lookup (None if absent). Safe in object_exists /
+    # distance_id, unlike a bare role(name) set which throws when passed as an id.
+    return em.symbols.get(name) or f'a2x_named("{_mast_str(name)}")'
 
 
 def emit_condition(em: Emitter, n: XmlNode, idx: int = 0) -> list[str]:
