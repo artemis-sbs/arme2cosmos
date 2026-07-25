@@ -145,6 +145,18 @@ class ConvertTests(unittest.TestCase):
         out2 = em.c_set_player_station_carried(XmlNode("set_player_station_carried", {"name": "Beachwood", "hullKeys": "singleseat fighter"}))
         self.assertEqual(out2, ['    hangar_random_craft_spawn(obj_beachwood, "fighter")'])
 
+    def test_add_ai_point_throttle_maps_to_target_pos(self):
+        # add_ai POINT_THROTTLE (fly to a point at a throttle) -> target_pos with the coordinate
+        # flip; the engine steers the NPC there (was a no-op a2x_add_ai before).
+        from arme2cosmos.emit import Emitter
+        from arme2cosmos.model import XmlNode
+        em = Emitter.__new__(Emitter)
+        em.notes = []
+        em.addons = set()
+        em.symbols = {"Profit": "obj_profit"}
+        out = em.c_add_ai(XmlNode("add_ai", {"type": "POINT_THROTTLE", "value1": "2000", "value2": "0", "value3": "15000", "value4": "1.0", "name": "Profit"}))
+        self.assertEqual(out, ['    target_pos(obj_profit, *a2x_pos(2000, 0, 15000), 1.0)'])
+
     def test_anomaly_pulls_upgrades_addon(self):
         _, _, sjson = self._convert()
         self.assertIn("upgrades", sjson)

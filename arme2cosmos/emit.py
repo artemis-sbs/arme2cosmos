@@ -317,12 +317,18 @@ class Emitter:
         typ = (n.get("type") or "").upper()
         if typ in _AI_DROP:
             return [f'    # add_ai {typ}: dropped -- {_AI_DROP[typ]}']
-        self.addons.add("ai")
         var = self.symbols.get(name)
         if var is None:
             self.note(f"add_ai {typ} references object '{name}' not captured here "
                       f"(forward ref or gm-selected) -- wire by hand")
             return [f'    # TODO add_ai {typ} on "{name}"']
+        # POINT_THROTTLE: fly to a point at a throttle. value1/2/3 = the 2.8 point (needs the
+        # coordinate flip), value4 = throttle. target_pos sets the target and the engine steers
+        # the NPC there (no brain needed) -- same as the `direct` command.
+        if typ == "POINT_THROTTLE":
+            v1, v2, v3 = n.get("value1", "0"), n.get("value2", "0"), n.get("value3", "0")
+            return [f'    target_pos({var}, *a2x_pos({v1}, {v2}, {v3}), {n.get("value4", "1")})']
+        self.addons.add("ai")
         if typ not in _AI_MAPPED:
             self.note(f"add_ai {typ} on '{name}': no Cosmos brain mapping yet "
                       f"(a2x_add_ai is a no-op for it) -- choose/author a brain")
