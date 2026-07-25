@@ -81,6 +81,14 @@ isn't importable). But to check that *generated* MAST is correct you need Cosmos
 - **Headless run** — `python -m cosmos_dev.mission_runner <mission> --test <secs>
   --map 0 --use-working-tree`. `--use-working-tree` makes it load the working-tree
   `sbs_utils` (so a2x edits are picked up over the packaged `.sbslib`).
+- **Conformance suite** — [**A2xTestRange**](https://github.com/artemis-sbs/A2xTestRange)
+  is a standalone sister mission (its own repo, checked out at
+  `Cosmos-1-3-0/data/missions/A2xTestRange`) with ~28 `test_convert_*` maps that assert
+  the *runtime behavior* of every emitted `a2x_*` call — that the a2x/LM calls the tool
+  emits actually produce the intended effect, not just that the right call was emitted.
+  When a conversion relies on a **new or changed** `a2x_*` behaviour, add/extend a map
+  there too. Run one: `python -m cosmos_dev.mission_runner ../A2xTestRange
+  --map test_convert_angle --test 20 --use-working-tree`.
 
 ## Repo layout
 
