@@ -57,6 +57,7 @@ _AUTO_PROPS = {
     *(f"systemCurEnergy{s}" for s in _SHPSYS_NAMES),
     "positionX", "positionY", "positionZ",
     "topSpeed", "currentRealSpeed",
+    "angle",  # absolute facing (yaw); a2x maps 2.8 radians -> Cosmos rot_quat (pi - angle)
     "angleDelta", "rollDelta", "pitchDelta", "turnRate", "throttle", "artScale",
     "energy", "hasSurrendered", "shieldsOn", "shieldStateFront", "shieldStateBack",
     "shieldMaxStateFront", "shieldMaxStateBack", "missileStoresNuke",
@@ -65,12 +66,24 @@ _AUTO_PROPS = {
     "missileStoresPShock", "missileStoresTag", "missileStoresECM", "countShk",
     "missileStoresBeacon", "countBea",
     "pushRadius",
+    # pirate docking reputation (LM docking reads a2x_pirate_rep for "pirate"-role players)
+    "pirateRepWithStations", "pirateRepWithStation",
 }
 
 # 2.8 properties documented as non-functional even in Artemis 2.8 -> a faithful port is a
 # no-op. Drop cleanly (a comment, not a TODO): wiring them would add behaviour 2.8 lacked.
 _PROP_NOOP = {
     "blocksShotFlag": "documented non-functional in Artemis 2.8",
+}
+
+# 2.8 properties that HAVE meaning but no Cosmos equivalent yet -- mapping them would need
+# an engine/library change, not mission work. Emit a clear stub comment (NOT a TODO) so a
+# port is not blocked on them; the note explains what a real fix would require.
+_PROP_ENGINE_STUB = {
+    # Cosmos exposes no music master-volume control (set_music_folder/file/tension only, no
+    # volume). 2.8 missions use this only to mute (value 0). Needs an engine music-volume API.
+    "musicObjectMasterVolume": "no Cosmos music master-volume API -- needs an engine change "
+                               "(2.8 uses it to fade/mute music, 0.0-1.0)",
 }
 
 # Tiny starter hull/art crosswalk. The real table is the tool's `artmap`
@@ -313,12 +326,26 @@ class Emitter:
         # 2.8 `from` is just the sender label (the comms title), not an object reference.
         return [f'    a2x_incoming_comms_text("{body}", from_name="{frm}")']
 
+    def _gm_selected(self, n: XmlNode) -> str | None:
+        """The GM's selected object, for a 2.8 command carrying ``use_gm_selection``.
+
+        2.8 GM-button commands act on whatever the Game Master has selected. The converter
+        turns 2.8 GM buttons into a gamemaster-gated ``//comms`` tree
+        (``build_gm_tree_routes``), and inside that button body ``COMMS_SELECTED_ID`` IS the
+        GM's current comms selection -- so that is the faithful target. Returns the MAST
+        expression, or ``None`` if the command is not GM-selection-based.
+        """
+        if n.get("use_gm_selection") is not None:
+            self.addons.update({"gamemaster", "gamemaster_comms"})
+            return "COMMS_SELECTED_ID"
+        return None
+
     def c_add_ai(self, n: XmlNode) -> list[str]:
         name = n.get("name")
         typ = (n.get("type") or "").upper()
         if typ in _AI_DROP:
             return [f'    # add_ai {typ}: dropped -- {_AI_DROP[typ]}']
-        var = self.symbols.get(name)
+        var = self.symbols.get(name) or self._gm_selected(n)
         if var is None:
             self.note(f"add_ai {typ} references object '{name}' not captured here "
                       f"(forward ref or gm-selected) -- wire by hand")
@@ -357,13 +384,13 @@ class Emitter:
         return [f'    a2x_add_ai({var}, "{typ}")']
 
     def c_clear_ai(self, n: XmlNode) -> list[str]:
-        var = self.symbols.get(n.get("name"))
+        var = self.symbols.get(n.get("name")) or self._gm_selected(n)
         if var is None:
             return [f'    # TODO clear_ai on "{n.get("name")}" (object not captured)']
         return [f"    a2x_clear_ai({var})"]
 
     def c_destroy(self, n: XmlNode) -> list[str]:
-        var = self.symbols.get(n.get("name"))
+        var = self.symbols.get(n.get("name")) or self._gm_selected(n)
         if var is None:
             self.note(f"destroy '{n.get('name')}' references object not captured "
                       f"(forward ref / gm-selected / player_slot) -- wire by hand")
@@ -384,11 +411,13 @@ class Emitter:
         if obj is None and n.get("player_slot") is not None:
             obj = self.player_var
         if obj is None:
+            obj = self._gm_selected(n)
+        if obj is None:
             return [f"    # TODO set_side_value: {_xml_repr(n)}"]
         return [f'    a2x_set_side_value({obj}, {_value(n.get("value", "0"))})']
 
     def c_direct(self, n: XmlNode) -> list[str]:
-        var = self.symbols.get(n.get("name"))
+        var = self.symbols.get(n.get("name")) or self._gm_selected(n)
         if var is None:
             return [f'    # TODO direct "{n.get("name")}" (object not captured)']
         thr = n.get("scriptThrottle", "1.0")
@@ -406,6 +435,8 @@ class Emitter:
         # player_slot props (energy / count* / shieldState ... on the player) -> the player ship
         if var is None and n.get("player_slot") is not None:
             var = self.player_var
+        if var is None:
+            var = self._gm_selected(n)  # use_gm_selection -> the GM's comms selection
         prop, val = n.get("property", "?"), n.get("value", "0")
         # global difficulty knobs (no object name): nonPlayer*/player* -> fleet coeffs
         if n.get("name") is None and prop in _FLEET_COEFF:
@@ -421,6 +452,9 @@ class Emitter:
             return [f'    a2x_set_object_property({var}, "{prop}", {_value(val)})']
         if prop in _PROP_NOOP:
             return [f'    # set_object_property {prop}: dropped -- {_PROP_NOOP[prop]}']
+        if prop in _PROP_ENGINE_STUB:
+            # a clear stub, not a TODO: does not block migration, needs an engine change
+            return [f'    # set_object_property {prop}={_value(val)}: stub -- {_PROP_ENGINE_STUB[prop]}']
         self.note(f"set_object_property {prop}={val} on '{n.get('name','?')}': no "
                   f"confirmed Cosmos mapping yet -- see docs/property_map.md")
         if var is None:
@@ -591,8 +625,24 @@ class Emitter:
             self.note(f"set_special ability '{ability}': object not resolvable / "
                       f"unmapped ability -- wire by hand")
             out.append(f"    # TODO set_special ability={ability} on={on}: {_xml_repr(n)}")
-        if n.get("ship") is not None or n.get("captain") is not None:
-            self.note("set_special ship/captain type has no Cosmos equivalent")
+        # 2.8 ship/captain form (no ability): power tier + captain personality, both
+        # enumerated ints (-1 = leave unchanged). a2x maps them onto the LM surrender/
+        # taunt/fleets systems (captain) and shield/weapon coeffs (ship power).
+        is_ship_cap = n.get("ship") is not None or n.get("captain") is not None
+        if is_ship_cap and obj is not None:
+            before = len(out)
+            cap = _int_or_none(n.get("captain"))
+            if cap is not None and cap >= 0:
+                self.addons.add("fleets")  # bombastic/seething/duplicitous drivers live in fleets/comms
+                out.append(f"    a2x_set_captain({obj}, {cap})")
+            ship = _int_or_none(n.get("ship"))
+            if ship is not None and ship >= 0:
+                out.append(f"    a2x_set_ship_power({obj}, {ship})")
+            if len(out) == before:
+                # both tiers -1/absent == 2.8 "leave unchanged": a real no-op, not a TODO
+                out.append(f"    # set_special no-op (ship/captain both unchanged): {_xml_repr(n)}")
+        elif is_ship_cap:
+            self.note("set_special ship/captain: object not captured -- wire by hand")
             out.append(f"    # TODO set_special ship/captain: {_xml_repr(n)}")
         return out or [f"    # TODO set_special: {_xml_repr(n)}"]
 
@@ -666,6 +716,20 @@ def _value(v: str) -> str:
     if re.fullmatch(r"-?0[0-9]+", v):
         return str(int(v))
     return v
+
+
+def _int_or_none(v):
+    """Parse a 2.8 attribute as an int, or None if absent / not an integer literal.
+
+    Used for the enumerated ship/captain tiers on ``set_special`` (values like -1..5);
+    anything non-integer (a variable/expression) yields None so the caller can skip it.
+    """
+    if v is None:
+        return None
+    try:
+        return int(str(v).strip())
+    except (ValueError, TypeError):
+        return None
 
 
 def _pyname(name: str) -> str:

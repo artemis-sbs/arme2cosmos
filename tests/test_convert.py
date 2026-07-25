@@ -493,8 +493,25 @@ class ConvertCommsButtonTests(unittest.TestCase):
         self.assertEqual(mapped, '    a2x_set_object_property(obj_x, "hasSurrendered", 1)')
         # unmapped property -> TODO
         todo = em.c_set_object_property(XmlNode("set_object_property",
-               {"name": "X", "property": "pirateRepWithStations", "value": "5"}))
+               {"name": "X", "property": "nebulaIsOpaque", "value": "1"}))
         self.assertTrue(any("# TODO" in ln for ln in todo))
+
+    def test_use_gm_selection_resolves_to_comms_selected(self):
+        # 2.8 commands carrying use_gm_selection act on the GM's selection; in the
+        # converter's gamemaster //comms tree that is COMMS_SELECTED_ID -- not a TODO.
+        from arme2cosmos.emit import Emitter
+        from arme2cosmos.model import XmlNode
+        em = Emitter.__new__(Emitter)
+        em.notes, em.addons, em.symbols, em.player_var, em.hullmap = [], set(), {}, None, None
+        add = em.c_add_ai(XmlNode("add_ai", {"type": "CHASE_PLAYER", "use_gm_selection": ""}))
+        self.assertEqual(add, ['    a2x_add_ai(COMMS_SELECTED_ID, "CHASE_PLAYER")'])
+        clr = em.c_clear_ai(XmlNode("clear_ai", {"use_gm_selection": ""}))
+        self.assertEqual(clr, ["    a2x_clear_ai(COMMS_SELECTED_ID)"])
+        # it also feature-detects the gamemaster addons
+        self.assertIn("gamemaster_comms", em.addons)
+        # without use_gm_selection and no captured name -> still a TODO
+        self.assertTrue(any("# TODO" in ln for ln in
+                            em.c_clear_ai(XmlNode("clear_ai", {"name": "ghost"}))))
 
     def test_tags_become_inventory_values(self):
         from arme2cosmos.emit import Emitter, emit_condition

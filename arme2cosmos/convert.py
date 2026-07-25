@@ -76,10 +76,22 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     for ev in mission.events:
         cb = next((c for c in ev.conditions if c.tag == "if_comms_button"), None)
         gb = next((c for c in ev.conditions if c.tag == "if_gm_button"), None)
+        gk = next((c for c in ev.conditions if c.tag == "if_gm_key"), None)
+        # A GM key shortcut (and any event acting on the GM's selection) only makes sense on
+        # the GM console -- route it into the gamemaster //comms tree, the one context where
+        # use_gm_selection == COMMS_SELECTED_ID is valid. Otherwise it would become a polling
+        # beat referencing an undefined COMMS_SELECTED_ID.
+        uses_gm_sel = any(n.get("use_gm_selection") is not None for n in ev.commands)
         if cb is not None:
             comms_btn_events.setdefault(cb.get("text", ""), ev)
         elif gb is not None:
             gm_btn_events.setdefault(gb.get("text", ""), ev)
+        elif gk is not None:
+            # Cosmos has no GM hotkeys -> expose the 2.8 hotkey action as a GM comms button
+            # (grouped under a "Hotkeys" submenu), the closest supported GM trigger.
+            gm_btn_events.setdefault(f"Hotkeys/{gk.get('keyText', '?')}", ev)
+        elif uses_gm_sel:
+            gm_btn_events.setdefault(ev.name or "GM Action", ev)
         else:
             plain_events.append(ev)
 

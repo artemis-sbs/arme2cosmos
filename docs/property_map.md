@@ -40,12 +40,14 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `turnRate` (90) | data_set | `turn_rate` | **DONE** | FIXED: was `turnRate` (dead key the engine never reads); the steering physics (NPC + player) reads `turn_rate` |
 | `throttle` (9) | data_set | `throttle` | **DONE** | |
 | `artScale` (89) | data_set | `local_scale_coeff` | **DONE** | |
-| `angle`/`pitch`/`roll` (137/13/24) | quat | orientation quaternion | VERIFY | WIKI: these are **radians** (not degrees), **clockwise from south** (0=south, +pi/2=west, pi/-pi=north, -pi/2=east). Yaw mechanics PROVEN (yaw t -> forward `(sin t, cos t)`). Still needs the Cosmos-side CW/CCW + east/west + the a2x_pos X/Z mirror reconciled by a facing spot-check; the mock's a2x objects have no `rot_quat` so not mock-testable |
+| `angle` (137) | quat | `engine_object.rot_quat` (yaw) | **DONE** | 2.8 yaw, **radians CW-from-south**. a2x maps **Cosmos yaw = pi - angle** (`a2x/coords.py` set_angle/get_angle/add_angle/copy_angle); the X/Z mirror also reverses the turn sense, so `addto angle += d` -> Cosmos yaw `-d`. Derivation: 2.8 facing `(-sin a, cos a)` mirrors to `(sin a, -cos a)`. VERIFIED in-engine (A2xTestRange `test_convert_angle` 7/7: all four cardinals + round-trip + addto + copy) and by mock forward_vector. Visual check: `angle_demo`. Wired via `_PROP` `("quat", ...)` + tool `_AUTO_PROPS` |
+| `pitch`/`roll` (13/24) | quat | orientation quaternion | VERIFY | rarer than `angle`; same radians/CW convention but the pitch/roll axes still need an in-engine facing spot-check (the `angle` yaw path is done) |
 | `topSpeed` (564) | data_set | `speed_coeff` (0-1) | **DONE** | PROVEN behaviorally vs the mock engine physics: NPC cruise = throttle x 36 u/s x speed_coeff (1.0/0.5/0.25 -> 36/18/9). NPC-only (Cosmos player top speed is fixed). WIKI: 2.8 topSpeed 1.0 = 100 u/s, so the 1:1 map preserves RELATIVE NPC speeds but not the absolute (Cosmos NPC baseline is 36 u/s, its own scale) |
 | `currentRealSpeed` (26) | obj | `cur_speed` (space_object attr) | **DONE** | read side: physics-driven current speed; setting is overwritten each tick (effectively read-only) |
 | `pushRadius` (269) | obj | `exclusion_radius` (space_object property) | **DONE** | 2.8 push radius = the object's exclusion / collision radius |
 | `deltaX` (2) | — | velocity; no data_set key | HUMAN | drop? |
 | `blocksShotFlag` (76) | — | dropped | **DONE** | 2.8 docs: "supposed to block torpedoes and beams if true, but reportedly does not work." Non-functional in 2.8 itself, so a faithful port is a no-op -- tool drops it as a comment (`_PROP_NOOP`) |
+| `musicObjectMasterVolume` (54) | — | stub | **DONE** | Mission-global music volume (no `name`; 0.0-1.0, mostly 0 to mute). Cosmos exposes no music master-volume control (`set_music_folder`/`play_music_file`/`set_music_tension` only). Emitted as a clear stub comment, NOT a TODO (`_PROP_ENGINE_STUB`) -- needs an engine music-volume API; does not block migration |
 | `triggersMines` (22) | — | no equivalent | HUMAN | |
 
 ## Shields
@@ -117,6 +119,7 @@ overpower/coolant).
 | `eliteAbilityBits` / `specialAbilityBits` (40) | data_set | `a2x_set_special_bits` | **DONE** | WIKI bit-sum (1=Stealth,2=LowVis,4=Cloak,8=HET,16=Warp,32=Teleport,64=Tractor,128=Drones,256=AntiMine,512=AntiTorp,1024=ShldDrain,2048=ShldVamp,4096=TeleBack,8192=ShldReset) -> each `set_special` |
 | `surrenderChance` (52) | inventory | `a2x_surrender_chance` | **DONE** | WIKI: 0-100 (a %). a2x writes it to the object inventory; the LM damage/comms addon reads it to decide surrender (a2x carries no LM import -- LM-side read is the follow-up) |
 | `tauntImmunityIndex` (24) | inventory | `a2x_taunt_immunity` | **DONE** | WIKI: 0 none / 1 temp / 2 perm. a2x writes it to the object inventory; LM taunt logic reads it (LM-side read is the follow-up) |
+| `pirateRepWithStations` (72) / `pirateRepWithStation` | inventory | `a2x_pirate_rep` | **DONE** | WIKI (v2.7.1+): only meaningful if the player ship has the `pirate` role. 0 (default) = stations refuse to let the pirate dock, >0 = allow. Ignored for non-pirates. a2x writes it to the player inventory; the LM docking addon (`docking.mast` +++ enable) gates on `has_role(...,"pirate") and a2x_pirate_rep <= 0`. Conformance: A2xTestRange `test_convert_pirate` 4/4 |
 | `age` (19) | — | LM monster age system | VERIFY | monsters have an age system now (LM prefabs: `monster_roll_age` / `monster_bake_age` + stage roles) -- map to that, not a raw key |
 
 ## Side / identity
