@@ -78,7 +78,7 @@ _COMMANDS = {
     "warning_popup_message": Coverage(PARTIAL, "popup / info panel to consoles"),
     "incoming_comms_text": Coverage(PARTIAL, "comms_receive / info panel"),
     "incoming_message": Coverage(PARTIAL, "comms button + play_audio_file"),
-    "set_damcon_members": Coverage(PARTIAL, "damcon team size (if supported)"),
+    "set_damcon_members": Coverage(FULL, "a2x_set_damcon_members -> DC1..DC3 team HP (grid_set_hp)"),
     "set_skybox": Coverage(PARTIAL, "alias"),
     # interaction-heavy -> new paths / manual (see plan 4.1)
     "set_comms_button": Coverage(MANUAL, "fold into //comms route + button (pair by text)"),

@@ -657,6 +657,15 @@ class Emitter:
             out.append(f"    # TODO set_special ship/captain: {_xml_repr(n)}")
         return out or [f"    # TODO set_special: {_xml_repr(n)}"]
 
+    def c_set_damcon_members(self, n: XmlNode) -> list[str]:
+        # damcons are a ship-grid concept (player ships in Cosmos). Resolve the ship from
+        # name/player_slot, defaulting to the player ship. value = the team's HP,
+        # team_index 0..2 -> DC1..DC3. (No-ops on a non-player ship with no grid.)
+        ship = self.symbols.get(n.get("name")) or (self.player_var if n.get("player_slot") is not None else None) or self.player_var
+        if ship is None:
+            return [f"    # TODO set_damcon_members: {_xml_repr(n)}"]
+        return [f'    a2x_set_damcon_members({ship}, {_value(n.get("team_index", "0"))}, {_value(n.get("value", "0"))})']
+
     def c_set_skybox_index(self, n: XmlNode) -> list[str]:
         # 2.8 SB00..SB29 -> a Cosmos skybox. Cosmos has no SB## art; a2x maps the index
         # across the LM basic_random_skybox media labels (@media/skybox/*), so feature-detect
@@ -813,6 +822,7 @@ _COMMAND_EMIT = {
     "set_player_grid_damage": Emitter.c_grid_damage,
     "set_special": Emitter.c_set_special,
     "set_skybox_index": Emitter.c_set_skybox_index,
+    "set_damcon_members": Emitter.c_set_damcon_members,
     "set_player_carried_type": Emitter.c_set_player_carried_type,
     "set_player_station_carried": Emitter.c_set_player_station_carried,
     "set_side_value": Emitter.c_set_side_value,
