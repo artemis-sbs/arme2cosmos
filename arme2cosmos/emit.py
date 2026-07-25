@@ -573,6 +573,8 @@ class Emitter:
         var = self.symbols.get(n.get("name"))
         if var is None and n.get("player_slot") is not None:
             var = self.player_var
+        if var is None:
+            var = self._gm_selected(n)  # use_gm_selection -> the GM's comms selection
         prop, val = n.get("property", "?"), n.get("value", "0")
         if var is not None and prop in _AUTO_PROPS:
             return [f'    a2x_addto_object_property({var}, "{prop}", {_value(val)})']
