@@ -3,17 +3,22 @@ name: Release
 # Cut a release by pushing a version tag, e.g.:
 #   git tag v0.1.0 && git push origin v0.1.0
 # The tag (minus the leading "v") must match the version in pyproject.toml
-# AND arme2cosmos/__init__.py, or the job fails before building.
+# AND arme2cosmos/__init__.py, or the build job fails before anything ships.
+#
+# Publishing to PyPI uses Trusted Publishing (OIDC) -- no API token/secret.
+# One-time PyPI setup (https://pypi.org/manage/account/publishing/):
+#   PyPI project : arme2cosmos     (use a "pending" publisher if it doesn't exist yet)
+#   Owner        : artemis-sbs
+#   Repository   : arme2cosmos
+#   Workflow     : release.yml
+#   Environment  : pypi            (matches `environment: pypi` in the pypi job below)
 
 on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write        # needed to create the GitHub Release
-
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +45,39 @@ jobs:
           python -m pip install --upgrade build
           python -m build
 
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # OIDC token for PyPI Trusted Publishing
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create the GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
