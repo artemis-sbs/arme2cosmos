@@ -317,8 +317,17 @@ class AmdBuilder:
                 if prev_secs:
                     q.complete_after = f"{prev_secs} seconds"
                 else:
-                    q.todos.append("timed beat: could not resolve the wait duration -- "
-                                   "set `Complete after:` by hand")
+                    # unknown wait -> fall back to a MAST timer watcher (the same
+                    # if_timer_finished polling the MAST target uses): complete this beat when
+                    # its own conditions fire, via a gate signal. Consistent with MAST, no TODO.
+                    conds = [c for c in ev.conditions if _cond_bool(self.em, c) is not None]
+                    if conds:
+                        sig, label = self._new_gate(conds)
+                        q.when = f"signal {sig}"
+                        q.gate_label = label
+                    else:
+                        q.todos.append("timed beat: could not resolve the wait -- "
+                                       "set a trigger by hand")
                 if i + 1 < len(chain):
                     q.reveal = keys[i + 1]
                 q.desc = self._objective_text(ev) or q.desc
@@ -352,7 +361,13 @@ class AmdBuilder:
                 elif outcome == "lose":
                     q.lose = _outcome_prose(ev)
                 else:
-                    q.todos.append("win or lose? (end-game decider -- classify by hand)")
+                    # Neither target distinguishes win/lose -- the mission just ends
+                    # (end_mission -> show_game_results, same in the MAST target). Leave the
+                    # decider quest neutral (no blocking story.amd TODO, matching MAST);
+                    # surface the optional enrichment in MIGRATION_NOTES instead.
+                    self.em.note(f"AMD: end-decider '{ev.name}' left neutral -- the mission "
+                                 f"just ends (as the MAST target does); optionally add "
+                                 f"Win:/Lose: to its story.amd quest to enrich the log")
                 q.desc = self._objective_text(ev) or q.desc
                 q.title = _quest_title(ev, q)
                 self.quests.append(q)
@@ -425,8 +440,11 @@ class AmdBuilder:
         used_ids.add(pkey)
         parent = Quest(pkey, "Destroy the hostile fleet")
         parent.desc = "Destroy every hostile vessel."
-        parent.todos.append("auto-grouped kill objectives; mark `Win:` here if clearing "
-                            "the fleet wins the mission, and split out any optional targets.")
+        # The kill Goal is real; whether clearing the fleet WINS is win/lose enrichment the
+        # MAST target does not make either -- leave it neutral (no blocking story.amd TODO)
+        # and note the optional enrichment in MIGRATION_NOTES.
+        self.em.note("AMD: auto-grouped kill objectives under 'Destroy the hostile fleet' -- "
+                     "optionally add Win: (if clearing the fleet wins) or split out optional targets.")
         for q in kills:
             q.parent = pkey
             q.required = True
