@@ -56,7 +56,7 @@ _COMMANDS = {
     "set_variable": Coverage(FULL, "x = ... / shared x = ..."),
     "set_timer": Coverage(FULL, "set_timer(0, name, seconds=...)"),
     "set_difficulty_level": Coverage(FULL, "DIFFICULTY assignment"),
-    "set_skybox_index": Coverage(FULL, "@media/skybox (index->name table)"),
+    "set_skybox_index": Coverage(FULL, "a2x_set_skybox_index -> LM basic_random_skybox labels (index % N)"),
     "log": Coverage(FULL, "log(text)"),
     "end_mission": Coverage(FULL, "signal_emit('show_game_results')"),
     "big_message": Coverage(FULL, "story dialog / info panel"),
