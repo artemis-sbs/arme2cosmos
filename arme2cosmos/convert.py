@@ -32,6 +32,30 @@ def _display_name(mission: Mission) -> str:
     return re.sub(r"^MISS_", "", mission.name).replace("_", " ")
 
 
+# The Cosmos default player ships (mirrors the LM settings.yaml PLAYER_LIST). Used when a
+# 2.8 mission creates no player ship of its own -- in 2.8 the player picks a ship, so many
+# missions never `create` one. A single flagship is the faithful default for a converted
+# solo mission; add rows here (up to 2.8 slots 0-7) to seat more player ships.
+_DEFAULT_PLAYER_LIST = [
+    {"name": "Artemis", "side": "tsn", "ship": "tsn_battle_cruiser", "face": "terran"},
+]
+
+
+def _player_default_lines(em: Emitter) -> list[str]:
+    """MAST header lines that control default player-ship creation. A mission that creates
+    its own player keeps PLAYER_CREATE_DEFAULT False; one that doesn't gets the Cosmos
+    default ships built from PLAYER_LIST (via the server console's create_default_player_ships).
+    Set as plain globals so they win over the console's ``default shared ... = SETTINGS.get``."""
+    if em.player_var is not None:
+        return ["PLAYER_CREATE_DEFAULT = False"]
+    out = ["# 2.8 created no player ship (the player picks one in 2.8) -- build Cosmos defaults.",
+           "PLAYER_CREATE_DEFAULT = True",
+           "PLAYER_LIST = ["]
+    out += [f"    {s!r}," for s in _DEFAULT_PLAYER_LIST]
+    out.append("]")
+    return out
+
+
 def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid") -> str:
     _prescan_named_objects(mission, em)
     em.emit_scan_roles = True  # recover set_ship_text scan_desc / hailtext (see below)
@@ -43,7 +67,7 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     lines.append("# Scaffold only -- see MIGRATION_NOTES.md for the punch-list.")
     lines.append("# Positions use 2.8 coords; a2x_* helpers flip them to Cosmos internally.")
     lines.append("")
-    lines.append("PLAYER_CREATE_DEFAULT = False")
+    lines.extend(_player_default_lines(em))
     lines.append("")
     lines.append(f'@map/{label} "{disp}"')
     for d in mission.description.replace("^", " ").split("\n"):

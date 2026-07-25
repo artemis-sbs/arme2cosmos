@@ -804,6 +804,7 @@ def _build_scans_amd(scans: dict) -> str:
 
 
 def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
+    from .convert import _player_default_lines
     label = _slug(mission.name)
     disp = _display_name(mission)
     L: list[str] = [
@@ -811,7 +812,7 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
         "# The quest tree lives in story.amd; this task spawns, tags roles, and grants it.",
         "# Positions use 2.8 coords; a2x_* helpers flip them to Cosmos internally.",
         "",
-        "PLAYER_CREATE_DEFAULT = False",
+        *_player_default_lines(em),
         "",
         f'@map/{label} "{disp}"',
     ]
