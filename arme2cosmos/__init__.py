@@ -8,4 +8,4 @@ and the coverage model are deliberately separated from any future emit stage so 
 analysis is useful on its own.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
