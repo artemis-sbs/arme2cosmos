@@ -384,7 +384,9 @@ def _button_body(em: Emitter, ev, handler_tag: str) -> list[str]:
     """The inline body (8-space indented) for a `+ "label":` button."""
     body: list[str] = []
     if ev is None:
-        body.append(f"        # TODO: 2.8 button had no {handler_tag} handler")
+        # A 2.8 button declared with no handler event is a genuine no-op button; keep it as
+        # a clean GM comms-tree item (not a TODO -- there is nothing to wire).
+        body.append(f"        # 2.8 button declared with no {handler_tag} handler -- no-op")
         body.append("        ~~ pass ~~")
     else:
         for c in ev.conditions:

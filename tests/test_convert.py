@@ -491,9 +491,10 @@ class ConvertCommsButtonTests(unittest.TestCase):
         mapped = em.c_set_object_property(XmlNode("set_object_property",
                  {"name": "X", "property": "hasSurrendered", "value": "1"}))[0]
         self.assertEqual(mapped, '    a2x_set_object_property(obj_x, "hasSurrendered", 1)')
-        # unmapped property -> TODO
+        # unmapped property -> TODO (use a synthetic name so it stays unmapped as real
+        # 2.8 properties get wired over time)
         todo = em.c_set_object_property(XmlNode("set_object_property",
-               {"name": "X", "property": "nebulaIsOpaque", "value": "1"}))
+               {"name": "X", "property": "someUnmapped2p8Prop", "value": "1"}))
         self.assertTrue(any("# TODO" in ln for ln in todo))
 
     def test_use_gm_selection_resolves_to_comms_selected(self):

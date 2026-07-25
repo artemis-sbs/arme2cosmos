@@ -68,6 +68,8 @@ _AUTO_PROPS = {
     "pushRadius",
     # pirate docking reputation (LM docking reads a2x_pirate_rep for "pirate"-role players)
     "pirateRepWithStations", "pirateRepWithStation",
+    "age",             # kept on inventory (a2x_age) for science flavor
+    "nebulaIsOpaque",  # -> nebula max_throttle (opaque slows ships, 0 = no limit)
 }
 
 # 2.8 properties documented as non-functional even in Artemis 2.8 -> a faithful port is a
@@ -441,6 +443,10 @@ class Emitter:
         # global difficulty knobs (no object name): nonPlayer*/player* -> fleet coeffs
         if n.get("name") is None and prop in _FLEET_COEFF:
             return [f'    a2x_set_fleet_coeff("{prop}", {_value(val)})']
+        # nameless nebulaIsOpaque -> global: set every nebula's throttle limit
+        # (non-zero = opaque = slows ships; 0 = no limit)
+        if n.get("name") is None and prop == "nebulaIsOpaque":
+            return [f'    a2x_set_nebula_opaque_all({_value(val)})']
         # sideValue as a property reuses the side-role reassignment (1=enemy / 2=friendly)
         if var is not None and prop in ("sideValue", "SideValue"):
             return [f"    a2x_set_side_value({var}, {_value(val)})"]
