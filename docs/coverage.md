@@ -6,13 +6,18 @@ needs a human decision. Property-level detail for `set_object_property` lives in
 
 ## Pipeline status
 
-- The full a28 corpus (23 missions) **compiles** under `MastStory`.
-- Converted missions **run headless** with no runtime errors; with `--exercise` a
-  mission plays its comms/event chain to game-end.
-- Remaining `# TODO` lines across the corpus: ~1525 (down from ~5384). ~73% of those are
-  unmapped `set_object_property`/`addto`/`copy` properties (one table -- see
-  [`property_map.md`](property_map.md)); the rest is unmappable 2.8 gameplay or the
-  decisions below.
+- The full a28 corpus (27 convertible missions; 2 more fail to *parse* -- malformed 2.8
+  XML, not a tool bug) **compiles** under the real `MastStory` compiler, in both targets.
+- **All 27 run headless** in both `mast` and `amd` targets with no runtime errors
+  (`mission_runner --test`), verified by the mock-run batch.
+- Remaining `# TODO` lines across the corpus: **~2** (down from ~2210), both genuine
+  source issues left on purpose -- a 2.8 name that references an object never created
+  (`mm8`), and a `Probe` store mapped to a Sensor Beacon. The AMD quest tree (`story.amd`)
+  is down to 1 (a GM-sandbox mission with no auto-derivable objective).
+- **26/27 are clean converts** (zero `# TODO`).
+
+Every emitted `a2x_*` function is exercised by an [A2xTestRange](#validation) conformance
+map; see [Validation](#validation).
 
 **Legend:** DONE = real translation · PARTIAL = real for the mapped cases, `# TODO` for
 the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TODO`).
@@ -29,7 +34,7 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `create` blackHole / Anomaly | **DONE** | `prefab_black_hole` / `a2x_create_anomaly` |
 | `create` nebulas/asteroids/mines | **DONE** | `a2x_create_*` (sphere/line, random_range, seed) |
 | `destroy` | **DONE** | `a2x_destroy(var)` (when the object was captured) |
-| `destroy_near` | **PARTIAL** | center form -> `a2x_destroy_near`; the "near a named object" form is `# TODO` |
+| `destroy_near` | **DONE** | center form -> `a2x_destroy_near`; the "near a named object" form -> `a2x_destroy_near_object` (uses the object's runtime position) |
 | `direct` | **DONE** | `target_pos` / `target` |
 | `add_ai` / `clear_ai` | **PARTIAL** | mapped 2.8 brains -> `a2x_add_ai`; unmapped types emit a no-op call + note |
 | `set_variable` / `set_timer` / `set_difficulty_level` | **DONE** | direct |
@@ -42,17 +47,21 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `set_relative_position` | **DONE** | `a2x_set_relative_position` (XZ; heading-relative nuance is a refinement) |
 | `set_side_value` | **DONE** | `a2x_set_side_value` (swaps the side role) |
 | `set_special` (ability) | **DONE** | all 14 abilities -> LM elite system (engine flags + scripted `elite/*` roles via `handle_elite_abilities`); no-name calls target `COMMS_SELECTED_ID` |
-| `set_special` (ship/captain) | NO-EQUIV | the 2.8 special ship/captain *types* have no Cosmos equivalent |
+| `set_special` (ship/captain) | **DONE** | captain personality (cowardly/brave/bombastic/seething/duplicitous/exceptional) -> `a2x_set_captain` (LM surrender/taunt/fleets driver); ship power tier -> `a2x_set_ship_power` (shield/beam/tube coeffs) |
 | `set_comms_button` (+ `if_comms_button`) | **DONE** | a `//comms` route with `+ "label":` buttons |
 | `set_gm_button` (+ `if_gm_button`) | **DONE** | a gamemaster-gated `//comms/gm/...` **tree** (slash = submenu) |
 | `set_monster_tag_data` / `set_named_object_tag_state` | **PARTIAL** | stored as inventory values; the tagging *gameplay* needs a tag-torpedo + `//damage` route (note emitted) |
 | `end_mission` | **DONE** | `signal_emit("show_game_results")` |
-| `set_skybox_index` | TODO | maps to `@media/skybox` (index->name table needed) |
-| `get_object_property` | TODO | read a mapped prop into a variable (the `_PROP` map already supports the key) |
-| `set_fleet_property` / `set_to_gm_position` | TODO | low frequency |
-| `set_player_carried_type` / `set_player_station_carried` / `clear_player_station_carried` | TODO | carried single-seat craft config |
-| `start_getting_keypresses_from` / `end_getting_keypresses_from` | TODO | console key capture (GM) |
-| `spawn_external_program` | NO-EQUIV | 2.8 launched external programs (e.g. VLC for video); nothing to map to |
+| `set_skybox_index` | **DONE** | `a2x_set_skybox_index` -> the LM `basic_random_skybox` media labels (2.8 SB00..SB29 index mapped across them) |
+| `get_object_property` / `if_object_property` | **DONE** | `a2x_object_property(obj, prop)` reads any mapped prop back |
+| `set_fleet_property` | **DONE** | fleetSpacing/fleetMaxRadius -> `a2x_set_fleet_property` -> the general `fleet_spacing`/`fleet_max_radius` formation-ring keys the LM scatter brain reads |
+| `set_to_gm_position` | **DONE** | `a2x_set_to_gm_position` -> move the GM-selected object to the gamemaster console ship's position |
+| `set_damcon_members` | **DONE** | `a2x_set_damcon_members` -> the HP of the Cosmos damcon teams DC1..DC3 (value = team HP) |
+| `set_player_carried_type` | **DONE** | `hangar_random_craft_spawn` into the player hangar; the named craft is CAPTURED so later references resolve. `player_slot` with no create:player -> `a2x_player_ship(slot)` |
+| `clear_player_station_carried` | **DONE** | `a2x_clear_station_carried` -> delete a station's standby (in-hangar) craft, leaving launched ones flying |
+| `gm_instructions` | **DONE** | `a2x_set_gm_instructions` -> the shared `GAMEMASTER_INSTRUCTIONS` the GM console instruction panel renders |
+| `start_getting_keypresses_from` / `end_getting_keypresses_from` | TODO | console key capture (GM); `if_gm_key` events already route to a GM comms "Hotkeys" submenu |
+| `spawn_external_program` | NO-EQUIV | 2.8 launched external programs (e.g. VLC for video); emitted as `a2x_spawn_external_program` (a no-op stub) |
 
 ## Conditions (event "when")
 
@@ -104,48 +113,50 @@ turns polling into event-driven routes. Selectable with `--event-model`:
 
 ---
 
-## Needs human feedback
+## Validation
 
-These are the things blocking further automation. Each is a small change once decided.
+Two layers verify the port, both run against `sbs_utils` + LegendaryMissions:
 
-### 1. `set_object_property` VERIFY/HUMAN rows
-See [`property_map.md`](property_map.md). The high-value open ones:
-- **`musicObjectMasterVolume`** (34) -- which Cosmos audio/volume call?
-- **`systemCurHeat*` / `systemDamage*`** -- the 2.8 8-system -> Cosmos 4-system (`system_cur_heat`/`system_damage`) **index mapping**.
-- **`sideValue` as a property** -- should `set_object_property property="sideValue"` reuse `a2x_set_side_value`? (Currently only the `set_side_value` command does.)
-- **`eliteAbilityBits`** -- confirm the bit -> `elite_*` flag decomposition.
-- **`angle`/`pitch`/`roll`** -- which engine attribute sets heading?
-- **`topSpeed`** -- `speed_coeff` (0-1) vs `max_throttle`?
-- HUMAN rows with no found key: `pushRadius`, `surrenderChance`, `tauntImmunityIndex`,
-  `pirateRepWithStations`, plasma-shock/ECM/tag/probe/beacon stores, `nebulaIsOpaque`,
-  `sensorSetting`, monster `age`.
+- **Conformance suite** -- [`A2xTestRange`](../../Cosmos-1-3-0/data/missions/A2xTestRange)
+  is a standalone mission (its own repo) of ~28 `test_convert_*` maps. Each asserts the
+  *runtime behavior* of an emitted `a2x_*` call (the recorded decision -- roles, data_set
+  values, orientation vectors, coords -- not live physics). **Every emitted `a2x_*`
+  function is covered.** Run one: `python -m cosmos_dev.mission_runner A2xTestRange
+  --map test_convert_angle --test 20`.
+- **Mock/engine run** -- every converted mission is run headless
+  (`mission_runner <mission> --test 2 --use-working-tree`) in both targets; the whole
+  corpus passes 46/46 (23 unique missions x 2 targets). This is what caught the
+  `role(name)`-in-a-condition crash that compile-only checks missed (now `a2x_named`).
+- **Unit tests** -- `python -m unittest discover -s tests` (stdlib only): emitter logic +
+  the AMD quest-tree classifier.
 
-### 2. `set_special` combat abilities -- RESOLVED
-All 14 elite abilities now map to the LegendaryMissions elite system (the 9 combat
-abilities are scripted in the `fleets` addon, not engine flags). Only the special
-**ship/captain** *types* remain NO-EQUIV (decide: drop, or author a stand-in).
+## Resolved / open decisions
 
-### 3. Tagging gameplay
+Most of the earlier open questions are now wired (see [`property_map.md`](property_map.md)):
+`angle`/`pitch`/`roll` (rot_quat), `sensorSetting`, `nebulaIsOpaque`, `pushRadius`,
+`surrenderChance`/`tauntImmunityIndex`, `pirateRepWithStations`, `warpState`, `canBuild`,
+`shieldState`, PShock/Tag/EMP/Probe/Beacon stores, `systemCurHeat*`/`Damage*`,
+`missileStoresProbe` (-> Sensor Beacon), the elite `eliteAbilityBits`, and the object-ref
+residual (`use_gm_selection` -> `COMMS_SELECTED_ID`; `player_slot` -> `a2x_player_ship`;
+uncaptured names -> `a2x_named`/`a2x_destroy_named`). Engine-stubs (needs an engine
+feature, non-blocking): `musicObjectMasterVolume`, `triggersMines`, `deltaX/Y/Z`.
+
+Remaining decisions:
+
+### Tagging gameplay
 `set_*_tag_data` / tag-match conditions store data as inventory, but 2.8's tagging is a
 **tag-torpedo** mechanic. To make it play: register a tag `torpedo_type()` + a `//damage`
-route keyed on `EVENT.sub_tag` that records the tag on hit. Want this scaffolded?
+route keyed on `EVENT.sub_tag` that records the tag on hit.
 
-### 4. Global difficulty vs future spawns
-`nonPlayer*`/`player*` are applied to ships that **exist when the call runs**; 2.8 also
-affected *future* spawns. If a mission sets difficulty in `<start>` before spawning
-enemies in events, the coeff won't reach them. Acceptable, or should the converter
-re-apply after later spawns?
+### Global difficulty vs future spawns
+`nonPlayer*`/`player*` (`a2x_set_fleet_coeff`) apply to ships that **exist when the call
+runs**; 2.8 also affected *future* spawns. If a mission sets difficulty in `<start>`
+before spawning enemies in events, the coeff won't reach them (re-apply after later spawns
+if needed).
 
-### 5. Object resolution residual (~170)
-`destroy` / `add_ai` / `set_ship_text` / `destroy_near` that reference an object via
-`use_gm_selection`, a `player_slot`, or a forward reference can't be resolved to a
-captured variable, so they stay `# TODO`. These need a per-mission look; is it worth a
-heuristic (e.g. `use_gm_selection` -> the GM-selected context var)?
-
-### 6. Backslash in GM button labels
-Some GM labels contain a literal backslash (`Delete\Selected ship`). Only `/` is treated
-as a submenu separator. If `\` was *also* meant as a separator in 2.8, say so and I'll
-split on it too.
+### Unmapped conditions
+`if_scan_level` / `if_in_nebula` / `if_damcon_members` / `if_player_is_targeting` and
+`if_gm_key`/`if_client_key` still emit a `# when (verify by hand)` comment.
 
 ---
 

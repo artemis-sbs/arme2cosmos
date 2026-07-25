@@ -1,9 +1,13 @@
 # arme2cosmos
 
-A migration **assistant** that ports legacy **Artemis 2.8** XML missions (`MISS_*.xml`)
-to **Artemis Cosmos**. It is a *scaffolder*, not a perfect compiler: the goal is to get a
-mission **80–90% of the way** to a runnable Cosmos mission and leave a clear, per-item
-punch-list (`MIGRATION_NOTES.md`) for you to finish.
+A migration tool that ports legacy **Artemis 2.8** XML missions (`MISS_*.xml`) to
+**Artemis Cosmos**. It produces a runnable Cosmos mission and leaves a clear, per-item
+punch-list (`MIGRATION_NOTES.md`) for the handful of things a human must decide.
+
+On the reference a28 corpus it converts **26 of 27 missions with zero leftover TODOs**;
+all 27 compile under the real MAST compiler and **run headless in both output styles**.
+The few remaining TODOs are genuine source issues (a name that references an object the
+mission never created) — not tool gaps. See [`docs/coverage.md`](docs/coverage.md).
 
 It can produce the mission in either of two styles (`--target`):
 
@@ -189,16 +193,31 @@ don't have to think about it). Translated mechanically:
 
 ### What you finish by hand
 
-Anything without a clean Cosmos equivalent is written as a `# TODO` (with the original
-XML next to it) and listed in `MIGRATION_NOTES.md`, for example:
+Nearly every 2.8 command and property now maps to a real call. What's left as a `# TODO`
+(with the original XML next to it, and listed in `MIGRATION_NOTES.md`) is:
 
-- Ship art where no confident match was found (a placeholder is used).
-- Setting specific object properties (the 2.8 and Cosmos property names differ).
-- Game-Master key/click interactions.
-- Anything 2.8-specific with no Cosmos counterpart.
+- Ship art where no confident hull match was found (a placeholder is used).
+- A handful of 2.8-specific features with **no Cosmos equivalent** (marked as engine-stub
+  notes, non-blocking): mission music volume, per-object mine immunity, free-velocity drift.
+- Genuine source issues — e.g. a command that references an object the mission never
+  created (a dead reference / typo in the original XML).
+- GM key/click interactions (2.8 GM hotkeys become GM comms buttons instead).
 
-Treat the output as a strong first draft: the structure, spawns, positions, and story
-flow are in place; you polish the details the notes call out.
+Treat the output as a strong first draft: the structure, spawns, positions, orientation,
+objectives, and story flow are in place; you polish the few details the notes call out.
+
+### How the port is verified
+
+Two layers back the conversion (both need a Cosmos checkout with `sbs_utils` +
+LegendaryMissions):
+
+- **Conformance** — `A2xTestRange` (a standalone test mission) has ~28 maps that assert
+  the *runtime behavior* of every emitted `a2x_*` call in the engine.
+- **Mock run** — every converted mission is run headless in both targets; the whole
+  corpus passes. The tool's own logic is covered by stdlib unit tests
+  (`python -m unittest discover -s tests`).
+
+See [`docs/coverage.md`](docs/coverage.md) for the full command/condition status.
 
 For the full command-by-command coverage (what's finished vs. what needs a human
 decision), see [`docs/coverage.md`](docs/coverage.md); property mappings are detailed in

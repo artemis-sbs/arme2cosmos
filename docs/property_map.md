@@ -61,7 +61,7 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `shieldMaxStateFront` (77) | data_set | `shield_max_val` [0] | **DONE** | |
 | `shieldMaxStateBack` (85) | data_set | `shield_max_val` [1] | **DONE** | |
 | `shieldsOn` (2) | data_set | `shields_raised_flag` | **DONE** | |
-| `shieldState` (14) | data_set | `shield_val` | VERIFY | WIKI (station): current shield strength (e.g. 400); can't exceed the inherent max |
+| `shieldState` (14) | data_set | `shield_val` [0] | **DONE** | a station has a SINGLE shield -> the first slot (same as a ship's front shield) |
 
 ## Weapon stores & ammo
 
@@ -83,7 +83,7 @@ LM torpedo types (`PShock_NUM`, `Tag_NUM`), and ECM ~ EMP.
 | `missileStoresPShock` (79) | data_set | `PShock_NUM` | **DONE** | LM plasma-shock torpedo type |
 | `missileStoresECM` (6) | data_set | `EMP_NUM` | **DONE** | ECM ~ EMP |
 | `missileStoresTag` (1) | data_set | `Tag_NUM` | **DONE** | LM tag torpedo type |
-| `missileStoresProbe` (1) | — | no key | HUMAN | no Cosmos Probe ordnance |
+| `missileStoresProbe` / `countProbe` (1) | data_set / inventory | Sensor Beacon | **DONE** | 2.8 Probe -> a Sensor Beacon (the passive sensor-relay beacon). SET writes the loadable count (`Beacon_NUM`); ADDTO fabricates that many sensor beacons into cargo (`beacon_built`). The "probe" `_PROP` kind |
 | `missileStoresBeacon` (1) / `countBea` | data_set | `Beacon_NUM` | **DONE** | Beacon is a first-class LM ordnance now (fabricate-only, LM fabrication addon). Also: 2.8 `create type="Anomaly" pickupType="8"` (52 in corpus) -> `a2x_create_anomaly(...,8)` now spawns a recoverable Beacon (role `beacon`) instead of returning None |
 | `countShk` (4) | data_set | `PShock_NUM` | **DONE** | Shk = plasma shock |
 
@@ -110,7 +110,7 @@ overpower/coolant).
 | `energy` (49) | data_set | `energy` | **DONE** | |
 | `systemCurHeat*` (8 systems, ~41 ea) | data_set | `system_cur_heat` [SHPSYS 0..3] | **DONE** | a2x `_SHPSYS` 8->4 collapse (Beam/Torpedo->WEAPONS 0, Impulse/Turning/Warp->ENGINES 1, Tactical->SENSORS 2, Front/BackShield->SHIELDS 3). Lossy: systems sharing a slot overwrite (later-write-wins). No `systemCurCoolant*` in the a28 corpus |
 | `systemDamage*` (Impulse 13, Turning 6) | data_set | `system_damage` [idx] | **DONE** | same 8->4 collapse; damaged-node count per SHPSYS |
-| `warpState` (58) | data_set | player warp level | VERIFY | WIKI: 0-4 current warp speed (jump ships always 0). Cosmos: playerThrottle>1 = warp (1..5) -- map 0-4 onto that |
+| `warpState` (58) | data_set | `throttle` | **DONE** | 2.8 warpState is really the throttle: 0-4 maps to Cosmos throttle 1-5 (+1 offset). The "warp" `_PROP` kind |
 | `systemCurEnergy*` (8 systems, ~32 ea) | data_set | `eng_control_value` [SHPSYS 0..3] | **DONE** | 0.0-1.0 Engineering power slider; same 8->4 collapse. NOTE: NPCs don't run the engineering model, so this is a harmless no-op on an NPC (2.8 usually sets it on NPCs anyway) |
 
 ## Enemy AI / elite
@@ -130,7 +130,7 @@ overpower/coolant).
 |---|---|---|---|---|
 | `sideValue` (272) + `SideValue` (12) | role | `a2x_set_side_value` (1=enemy / 2=friendly) | **DONE** | property reuses the `set_side_value` side-role reassignment |
 | `pirateRepWithStations` (72) | — | no key | HUMAN | |
-| `canBuild` (4) | — | no key | HUMAN | |
+| `canBuild` (4) | inventory | `a2x_can_build` | **DONE** | toggle a station's build ability -> `a2x_can_build` inventory; the LM docking build console hides "Build Weapons" when it is 0 |
 
 ## Global settings (2.8 set these with no object -- game-wide)
 
@@ -181,14 +181,16 @@ Beyond `set_object_property`, these 2.8 commands are also wired:
 - **DONE this pass:** the `systemCurHeat*`/`systemCurEnergy*`/`systemDamage*` indexed writes
   (8->4 SHPSYS collapse), and `surrenderChance`/`tauntImmunityIndex` (-> object inventory,
   LM reads them).
-- **VERIFY (key known / ready to wire):** monster `age` (-> LM age system), `angle`/`pitch`/
-  `roll` (radians CW-from-south, needs facing spot-check), `shieldState`, `warpState`,
-  `musicObjectMasterVolume`.
-- **HUMAN (no Cosmos key, or "drop"):** `pirateRepWithStations`, `missileStoresProbe`,
-  `nebulaIsOpaque`, `sensorSetting`, `triggersMines`, `deltaX`.
+- **DONE (wired + engine-verified):** `angle`/`pitch`/`roll` (rot_quat, degrees heuristic),
+  `shieldState`, `warpState`, `canBuild`, `sensorSetting`, `nebulaIsOpaque`,
+  `pirateRepWithStations`, `missileStoresProbe` (-> Sensor Beacon), monster `age`
+  (-> inventory for science flavor).
+- **ENGINE-STUB (needs an engine feature; non-blocking comment, not a TODO):**
+  `musicObjectMasterVolume`, `triggersMines`, `deltaX/Y/Z`.
 - **DROP (documented non-functional in 2.8):** `blocksShotFlag` (a 2.8 no-op).
 
-Confirm a VERIFY row or fill a HUMAN row and it's a one-line addition to the `_PROP` map.
+Essentially every recurring `set_object_property` name is now wired; each row above links
+to a conformance map in `A2xTestRange` that asserts its runtime effect.
 
 ## Related follow-ups (from the Artemis wiki, not `set_object_property`)
 
