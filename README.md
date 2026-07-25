@@ -216,8 +216,10 @@ objectives, and story flow are in place; you polish the few details the notes ca
 Two layers back the conversion (both need a Cosmos checkout with `sbs_utils` +
 LegendaryMissions):
 
-- **Conformance** — `A2xTestRange` (a standalone test mission) has ~28 maps that assert
-  the *runtime behavior* of every emitted `a2x_*` call in the engine.
+- **Conformance** — [**A2xTestRange**](https://github.com/artemis-sbs/A2xTestRange), a
+  standalone sister test mission (its own repo), has ~28 maps that assert the *runtime
+  behavior* of every emitted `a2x_*` call in the engine — not just that the right call is
+  emitted (that's what the unit tests cover), but that it produces the intended effect.
 - **Mock run** — every converted mission is run headless in both targets; the whole
   corpus passes. The tool's own logic is covered by stdlib unit tests
   (`python -m unittest discover -s tests`).

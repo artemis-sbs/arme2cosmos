@@ -117,8 +117,8 @@ turns polling into event-driven routes. Selectable with `--event-model`:
 
 Two layers verify the port, both run against `sbs_utils` + LegendaryMissions:
 
-- **Conformance suite** -- [`A2xTestRange`](../../Cosmos-1-3-0/data/missions/A2xTestRange)
-  is a standalone mission (its own repo) of ~28 `test_convert_*` maps. Each asserts the
+- **Conformance suite** -- [`A2xTestRange`](https://github.com/artemis-sbs/A2xTestRange)
+  is a standalone sister mission (its own repo) of ~28 `test_convert_*` maps. Each asserts the
   *runtime behavior* of an emitted `a2x_*` call (the recorded decision -- roles, data_set
   values, orientation vectors, coords -- not live physics). **Every emitted `a2x_*`
   function is covered.** Run one: `python -m cosmos_dev.mission_runner A2xTestRange
