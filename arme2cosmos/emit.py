@@ -605,6 +605,9 @@ class Emitter:
         # of the right variant into the player's hangar (LM hangar_random_craft_spawn spawns it
         # AND associates it with the ship). bay_slot / craft name are dropped.
         ship = self.player_var
+        if ship is None and n.get("player_slot") is not None:
+            # no explicit create:player -> resolve the 2.8 slot to the runtime player-ship ID
+            ship = f'a2x_player_ship({_value(n.get("player_slot"))})'
         if ship is None:
             return [f"    # TODO set_player_carried_type (no player ship): {_xml_repr(n)}"]
         self.addons.add("hangar")
