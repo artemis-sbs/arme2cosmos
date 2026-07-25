@@ -655,6 +655,14 @@ class Emitter:
         self.addons.add("hangar")
         return [f'    hangar_random_craft_spawn({ship}, "{_craft_variant(n.get("hullKeys"))}")']
 
+    def c_clear_player_station_carried(self, n: XmlNode) -> list[str]:
+        # remove a station's stored (standby, in-hangar) single-seat craft
+        station = self.symbols.get(n.get("name"))
+        if station is None:
+            return [f"    # TODO clear_player_station_carried: {_xml_repr(n)}"]
+        self.addons.add("hangar")
+        return [f"    a2x_clear_station_carried({station})"]
+
     def c_set_special(self, n: XmlNode) -> list[str]:
         # the ship: a captured named object, a player_slot, or (GM-button handlers
         # with no name) the comms-selected ship.
@@ -877,6 +885,7 @@ _COMMAND_EMIT = {
     "set_to_gm_position": Emitter.c_set_to_gm_position,
     "set_player_carried_type": Emitter.c_set_player_carried_type,
     "set_player_station_carried": Emitter.c_set_player_station_carried,
+    "clear_player_station_carried": Emitter.c_clear_player_station_carried,
     "set_side_value": Emitter.c_set_side_value,
     "big_message": Emitter.c_big_message,
     "incoming_comms_text": Emitter.c_comms_text,
