@@ -69,6 +69,7 @@ _AUTO_PROPS = {
     "countHoming", "countMine", "countEMP",
     "missileStoresPShock", "missileStoresTag", "missileStoresECM", "countShk",
     "missileStoresBeacon", "countBea",
+    "missileStoresProbe", "countProbe",  # 2.8 Probe -> Sensor Beacon (set count / add to cargo)
     "pushRadius",
     # pirate docking reputation (LM docking reads a2x_pirate_rep for "pirate"-role players)
     "pirateRepWithStations", "pirateRepWithStation",
