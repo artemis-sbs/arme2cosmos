@@ -41,7 +41,7 @@ class ConvertTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def _convert(self):
-        d = convert_file(self.xml, self.out)
+        d = convert_file(self.xml, self.out, target="mast")
         with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
             story = f.read()
         with open(os.path.join(d, "story.json"), encoding="utf-8") as f:
@@ -249,8 +249,8 @@ class ConvertAddAiTests(unittest.TestCase):
     def test_event_model_hybrid_vs_linear(self):
         # ADD_AI_SAMPLE's single event waits on a flag (go == 1): in hybrid it becomes
         # an event-driven //signal route; in linear it is folded into the scene chain.
-        dh = convert_file(self.xml, self.out + "h", event_model="hybrid")
-        dl = convert_file(self.xml, self.out + "l", event_model="linear")
+        dh = convert_file(self.xml, self.out + "h", event_model="hybrid", target="mast")
+        dl = convert_file(self.xml, self.out + "l", event_model="linear", target="mast")
         sh = open(os.path.join(dh, "story.mast"), encoding="utf-8").read()
         sl = open(os.path.join(dl, "story.mast"), encoding="utf-8").read()
         # hybrid: a //signal route guarded by the flag value (no polling task)
@@ -292,13 +292,13 @@ class ConvertEventLoopTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def _story(self):
-        d = convert_file(self.xml, self.out)
+        d = convert_file(self.xml, self.out, target="mast")
         with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
             return f.read()
 
     def test_a28_compatible_makes_every_event_a_polling_task(self):
         # worst-case faithful: no chain, no routes -- both events become ind_event loops.
-        d = convert_file(self.xml, self.out + "a", event_model="a28_compatible")
+        d = convert_file(self.xml, self.out + "a", event_model="a28_compatible", target="mast")
         story = open(os.path.join(d, "story.mast"), encoding="utf-8").read()
         self.assertIn("=== ind_event_0", story)
         self.assertIn("=== ind_event_1", story)
@@ -362,7 +362,7 @@ class ConvertFlagSignalTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_flag_wait_becomes_signal_route_and_emit(self):
-        d = convert_file(self.xml, self.out)
+        d = convert_file(self.xml, self.out, target="mast")
         with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
             story = f.read()
         # the set_variable that the route listens on also emits the signal (push)

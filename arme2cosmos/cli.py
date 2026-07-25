@@ -113,10 +113,11 @@ def build_parser() -> argparse.ArgumentParser:
                       help="sbslib/mastlib version tag for story.json (default: v1.4.0)")
     conv.add_argument("--hullmap", default=None,
                       help="hullmap.json (from `artmap`) to resolve real ship art")
-    conv.add_argument("--target", choices=["mast", "amd"], default="mast",
-                      help="mast (default): MAST-only scaffold (see --event-model); "
-                           "amd: an AMD quest tree (story.amd) + a thin story.mast "
-                           "(see docs/amd_target.md)")
+    conv.add_argument("--target", choices=["mast", "amd"], default="amd",
+                      help="amd (default): an AMD quest tree (story.amd) + a thin "
+                           "story.mast, with a live objectives log (see docs/amd_target.md); "
+                           "mast: a MAST-only scaffold, a faithful translation of the "
+                           "2.8 event model (see --event-model)")
     conv.add_argument("--event-model", choices=["hybrid", "linear", "a28_compatible"],
                       default="hybrid",
                       help="hybrid (default): flag-chained scenes stay linear, "

@@ -619,12 +619,12 @@ def build_notes(mission: Mission, em: Emitter) -> str:
 
 def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSION,
                  hullmap: dict | None = None, event_model: str = "hybrid",
-                 target: str = "mast") -> str:
+                 target: str = "amd") -> str:
     """Convert one mission XML; write a scaffold dir under out_root. Returns the dir.
 
-    ``target='mast'`` (default) emits the MAST-only scaffold controlled by
-    ``event_model``. ``target='amd'`` emits an AMD quest tree (story.amd) plus a thin
-    story.mast instead -- see ``docs/amd_target.md``.
+    ``target='amd'`` (default) emits an AMD quest tree (story.amd) plus a thin
+    story.mast -- see ``docs/amd_target.md``. ``target='mast'`` emits the MAST-only
+    scaffold controlled by ``event_model`` instead.
     """
     mission = parse_file(path)
     em = Emitter(mission, hullmap=hullmap)
