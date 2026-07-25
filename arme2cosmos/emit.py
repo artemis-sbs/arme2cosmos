@@ -328,12 +328,17 @@ class Emitter:
         if typ == "POINT_THROTTLE":
             v1, v2, v3 = n.get("value1", "0"), n.get("value2", "0"), n.get("value3", "0")
             return [f'    target_pos({var}, *a2x_pos({v1}, {v2}, {v3}), {n.get("value4", "1")})']
-        # FOLLOW_COMMS_ORDERS: Cosmos offers a "give orders" comms option to any ship with the
-        # civ+friendly roles (LM comms/friendly_give_orders). Neutrals spawn as side "civilian"
-        # (no match), so grant those roles to make the ship player-orderable.
+        # FOLLOW_COMMS_ORDERS: make the ship player-orderable in Cosmos (LM
+        # comms/friendly_give_orders). civ+friendly gives the give-orders comms + Hail; the
+        # actual "Have <ship> go here / attack that" ORDERS POPUP is gated on the
+        # prefab_npc_defender role + a give_orders_type (the same idiom the "take as prize"
+        # flow uses). Grant all so the popup appears -- the 2.8 intent (accepts player orders).
         if typ == "FOLLOW_COMMS_ORDERS":
             self.addons.add("comms")
-            return [f'    add_role({var}, "civ")', f'    add_role({var}, "friendly")']
+            return [f'    add_role({var}, "civ")',
+                    f'    add_role({var}, "friendly")',
+                    f'    add_role({var}, "prefab_npc_defender")',
+                    f'    set_inventory_value({var}, "give_orders_type", "objective/orders/defender")']
         self.addons.add("ai")
         if typ not in _AI_MAPPED:
             self.note(f"add_ai {typ} on '{name}': no Cosmos brain mapping yet "
