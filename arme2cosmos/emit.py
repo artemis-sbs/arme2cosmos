@@ -329,6 +329,10 @@ class Emitter:
         if typ == "POINT_THROTTLE":
             v1, v2, v3 = n.get("value1", "0"), n.get("value2", "0"), n.get("value3", "0")
             return [f'    target_pos({var}, *a2x_pos({v1}, {v2}, {v3}), {n.get("value4", "1")})']
+        # DIR_THROTTLE: fly a compass heading (value1) at a throttle (value2) -> a2x computes a
+        # far point along the heading and drives there via the goto_object_or_location brain.
+        if typ == "DIR_THROTTLE":
+            return [f'    a2x_dir_throttle({var}, {n.get("value1", "0")}, {n.get("value2", "1")})']
         # FOLLOW_COMMS_ORDERS: make the ship player-orderable in Cosmos (LM
         # comms/friendly_give_orders). civ+friendly gives the give-orders comms + Hail; the
         # actual "Have <ship> go here / attack that" ORDERS POPUP is gated on the

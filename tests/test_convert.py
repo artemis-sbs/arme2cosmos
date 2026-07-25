@@ -156,6 +156,12 @@ class ConvertTests(unittest.TestCase):
         em.symbols = {"Profit": "obj_profit"}
         out = em.c_add_ai(XmlNode("add_ai", {"type": "POINT_THROTTLE", "value1": "2000", "value2": "0", "value3": "15000", "value4": "1.0", "name": "Profit"}))
         self.assertEqual(out, ['    target_pos(obj_profit, *a2x_pos(2000, 0, 15000), 1.0)'])
+        # DIR_THROTTLE -> a2x_dir_throttle(heading, throttle) (goto_object_or_location brain)
+        outd = em.c_add_ai(XmlNode("add_ai", {"type": "DIR_THROTTLE", "value1": "270", "value2": "0.3", "name": "Profit"}))
+        self.assertEqual(outd, ['    a2x_dir_throttle(obj_profit, 270, 0.3)'])
+        # DEFEND -> LM defender role + protect-area objective
+        outdef = em.c_add_ai(XmlNode("add_ai", {"type": "DEFEND", "value1": "5000", "value2": "5000", "name": "Profit"}))
+        self.assertEqual(outdef, ['    add_role(obj_profit, "prefab_npc_defender")', '    objective_add(obj_profit, objective_protect_area)'])
         # FOLLOW_COMMS_ORDERS -> orderable + the LM orders popup (defender role + give_orders_type)
         out2 = em.c_add_ai(XmlNode("add_ai", {"type": "FOLLOW_COMMS_ORDERS", "name": "Profit"}))
         self.assertEqual(out2, ['    add_role(obj_profit, "civ")',
