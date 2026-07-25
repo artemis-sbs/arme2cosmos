@@ -48,6 +48,7 @@ Counts in parentheses = occurrences across the a28 corpus.
 | `deltaX` (2) | — | velocity; no data_set key | HUMAN | drop? |
 | `blocksShotFlag` (76) | — | dropped | **DONE** | 2.8 docs: "supposed to block torpedoes and beams if true, but reportedly does not work." Non-functional in 2.8 itself, so a faithful port is a no-op -- tool drops it as a comment (`_PROP_NOOP`) |
 | `musicObjectMasterVolume` (54) | — | stub | **DONE** | Mission-global music volume (no `name`; 0.0-1.0, mostly 0 to mute). Cosmos exposes no music master-volume control (`set_music_folder`/`play_music_file`/`set_music_tension` only). Emitted as a clear stub comment, NOT a TODO (`_PROP_ENGINE_STUB`) -- needs an engine music-volume API; does not block migration |
+| `triggersMines` (22) | — | stub | **DONE** | 2.8 `triggersMines=0` = the object is not damaged by mines (civilian ships). Cosmos mine triggering (`_is_damageable`) and blast damage are engine-side; a `//damage` route only reacts after the hit, so there is no clean per-object mine-immunity hook. Emitted as a stub comment, NOT a TODO (`_PROP_ENGINE_STUB`) -- needs an engine mine-immunity feature |
 | `triggersMines` (22) | — | no equivalent | HUMAN | |
 
 ## Shields

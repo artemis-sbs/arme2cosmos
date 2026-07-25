@@ -86,6 +86,11 @@ _PROP_ENGINE_STUB = {
     # volume). 2.8 missions use this only to mute (value 0). Needs an engine music-volume API.
     "musicObjectMasterVolume": "no Cosmos music master-volume API -- needs an engine change "
                                "(2.8 uses it to fade/mute music, 0.0-1.0)",
+    # 2.8 triggersMines=0 -> the object is not damaged by mines. Cosmos mine triggering
+    # (_is_damageable) and blast damage are engine-side; a //damage route only reacts after
+    # the hit, so there is no clean per-object mine-immunity hook. Needs an engine feature.
+    "triggersMines": "no Cosmos per-object mine-immunity -- needs an engine change "
+                     "(2.8 triggersMines=0 = not damaged by mines)",
 }
 
 # Tiny starter hull/art crosswalk. The real table is the tool's `artmap`
