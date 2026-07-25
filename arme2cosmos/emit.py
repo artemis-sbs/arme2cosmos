@@ -328,6 +328,12 @@ class Emitter:
         if typ == "POINT_THROTTLE":
             v1, v2, v3 = n.get("value1", "0"), n.get("value2", "0"), n.get("value3", "0")
             return [f'    target_pos({var}, *a2x_pos({v1}, {v2}, {v3}), {n.get("value4", "1")})']
+        # FOLLOW_COMMS_ORDERS: Cosmos offers a "give orders" comms option to any ship with the
+        # civ+friendly roles (LM comms/friendly_give_orders). Neutrals spawn as side "civilian"
+        # (no match), so grant those roles to make the ship player-orderable.
+        if typ == "FOLLOW_COMMS_ORDERS":
+            self.addons.add("comms")
+            return [f'    add_role({var}, "civ")', f'    add_role({var}, "friendly")']
         self.addons.add("ai")
         if typ not in _AI_MAPPED:
             self.note(f"add_ai {typ} on '{name}': no Cosmos brain mapping yet "

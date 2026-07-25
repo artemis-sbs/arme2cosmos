@@ -156,6 +156,9 @@ class ConvertTests(unittest.TestCase):
         em.symbols = {"Profit": "obj_profit"}
         out = em.c_add_ai(XmlNode("add_ai", {"type": "POINT_THROTTLE", "value1": "2000", "value2": "0", "value3": "15000", "value4": "1.0", "name": "Profit"}))
         self.assertEqual(out, ['    target_pos(obj_profit, *a2x_pos(2000, 0, 15000), 1.0)'])
+        # FOLLOW_COMMS_ORDERS -> the civ+friendly roles the LM give-orders comms route requires
+        out2 = em.c_add_ai(XmlNode("add_ai", {"type": "FOLLOW_COMMS_ORDERS", "name": "Profit"}))
+        self.assertEqual(out2, ['    add_role(obj_profit, "civ")', '    add_role(obj_profit, "friendly")'])
 
     def test_anomaly_pulls_upgrades_addon(self):
         _, _, sjson = self._convert()
