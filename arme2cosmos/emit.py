@@ -62,6 +62,7 @@ _AUTO_PROPS = {
     "missileStoresHoming", "missileStoresMine", "missileStoresEMP", "countNuke",
     "countHoming", "countMine", "countEMP",
     "missileStoresPShock", "missileStoresTag", "missileStoresECM", "countShk",
+    "missileStoresBeacon", "countBea",
     "pushRadius",
 }
 

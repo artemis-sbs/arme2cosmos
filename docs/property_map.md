@@ -79,8 +79,8 @@ LM torpedo types (`PShock_NUM`, `Tag_NUM`), and ECM ~ EMP.
 | `missileStoresPShock` (79) | data_set | `PShock_NUM` | **DONE** | LM plasma-shock torpedo type |
 | `missileStoresECM` (6) | data_set | `EMP_NUM` | **DONE** | ECM ~ EMP |
 | `missileStoresTag` (1) | data_set | `Tag_NUM` | **DONE** | LM tag torpedo type |
-| `missileStoresProbe` (1) | — | no key | HUMAN | |
-| `missileStoresBeacon` (1) | — | no key | HUMAN | |
+| `missileStoresProbe` (1) | — | no key | HUMAN | no Cosmos Probe ordnance |
+| `missileStoresBeacon` (1) / `countBea` | data_set | `Beacon_NUM` | **DONE** | Beacon is a first-class LM ordnance now (fabricate-only, LM fabrication addon). Also: 2.8 `create type="Anomaly" pickupType="8"` (52 in corpus) -> `a2x_create_anomaly(...,8)` now spawns a recoverable Beacon (role `beacon`) instead of returning None |
 | `countShk` (4) | data_set | `PShock_NUM` | **DONE** | Shk = plasma shock |
 
 ## Ship systems (heat / energy / damage)
@@ -179,7 +179,7 @@ Beyond `set_object_property`, these 2.8 commands are also wired:
 - **VERIFY (key known / ready to wire):** monster `age` (-> LM age system), `angle`/`pitch`/
   `roll` (radians CW-from-south, needs facing spot-check), `shieldState`, `warpState`,
   `musicObjectMasterVolume`.
-- **HUMAN (no Cosmos key, or "drop"):** `pirateRepWithStations`, `missileStoresProbe`/`Beacon`,
+- **HUMAN (no Cosmos key, or "drop"):** `pirateRepWithStations`, `missileStoresProbe`,
   `nebulaIsOpaque`, `sensorSetting`, `triggersMines`, `deltaX`.
 - **DROP (documented non-functional in 2.8):** `blocksShotFlag` (a 2.8 no-op).
 
