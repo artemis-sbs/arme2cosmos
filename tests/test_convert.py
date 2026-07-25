@@ -586,5 +586,48 @@ class ConvertCommsButtonTests(unittest.TestCase):
         self.assertIn("~~ pass ~~", story)
 
 
+class AmdQuestStructureTests(unittest.TestCase):
+    """The AMD target's quest-tree classification: value-specific end-deciders, no spurious
+    win/lose TODOs, and the timed-beat gate fallback."""
+
+    def _amd(self, mission):
+        from arme2cosmos.emit import Emitter
+        from arme2cosmos.amd_emit import build_amd_target
+        em = Emitter(mission, hullmap=None)
+        return build_amd_target(mission, em, "v1.4.0")["story.amd"]
+
+    def test_phase_counter_advance_is_not_a_decider(self):
+        # end_mission gates on Event1 >= 19; a setup event that merely advances Event1 to 3
+        # must NOT be classified as a win/lose decider (value-specific _is_decider).
+        from arme2cosmos.model import Mission, Event, XmlNode
+        m = Mission(name="MISS_Phase", source_path="p.xml")
+        end = Event(name="End", index=0,
+                    conditions=[XmlNode("if_variable", {"name": "Event1", "comparator": "GREATER_EQUAL", "value": "19"})],
+                    commands=[XmlNode("end_mission", {})])
+        setup = Event(name="Build Maze", index=1,
+                      conditions=[XmlNode("if_variable", {"name": "Event1", "comparator": "EQUALS", "value": "2"})],
+                      commands=[XmlNode("create", {"type": "asteroids", "count": "5", "startX": "50000", "startY": "0", "startZ": "50000"}),
+                                XmlNode("set_variable", {"name": "Event1", "value": "3", "integer": "yes"})])
+        m.events = [end, setup]
+        amd = self._amd(m)
+        # the setup event should not carry the "win or lose?" decider TODO
+        self.assertNotIn("win or lose?", amd)
+
+    def test_no_win_lose_todo_ever(self):
+        # even a REAL end-decider (sets the gate value) is left neutral, not a story.amd TODO.
+        from arme2cosmos.model import Mission, Event, XmlNode
+        m = Mission(name="MISS_Decide", source_path="d.xml")
+        end = Event(name="End", index=0,
+                    conditions=[XmlNode("if_variable", {"name": "Win", "comparator": "EQUALS", "value": "1"})],
+                    commands=[XmlNode("end_mission", {})])
+        decider = Event(name="Trigger", index=1,
+                        conditions=[XmlNode("if_variable", {"name": "Setup", "comparator": "EQUALS", "value": "1"})],
+                        commands=[XmlNode("set_variable", {"name": "Win", "value": "1", "integer": "yes"})])
+        m.events = [end, decider]
+        amd = self._amd(m)
+        self.assertNotIn("win or lose?", amd)
+        self.assertNotIn("mark `Win:`", amd)  # kill-grouping TODO also neutralized
+
+
 if __name__ == "__main__":
     unittest.main()
