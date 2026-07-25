@@ -58,6 +58,7 @@ _AUTO_PROPS = {
     "positionX", "positionY", "positionZ",
     "topSpeed", "currentRealSpeed",
     "angle",  # absolute facing (yaw); a2x maps 2.8 radians -> Cosmos rot_quat (pi - angle)
+    "roll",   # roll about the forward axis (radians); composed onto rot_quat
     "angleDelta", "rollDelta", "pitchDelta", "turnRate", "throttle", "artScale",
     "energy", "hasSurrendered", "shieldsOn",
     "shieldState",  # station single shield -> shield_val[0]
