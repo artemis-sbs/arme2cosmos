@@ -27,17 +27,18 @@ It can produce the mission in either of two styles (`--target`):
 
 ## Install
 
-Run it directly from the folder:
+Install from PyPI to get the `arme2cosmos` command:
+
+```sh
+pip install arme2cosmos
+arme2cosmos --help
+```
+
+Or run it straight from a checkout without installing (Python 3.10+, no dependencies):
 
 ```sh
 python -m arme2cosmos --help
-```
-
-Or install it to get the `arme2cosmos` command:
-
-```sh
-pip install .
-arme2cosmos --help
+# ...or install the checkout itself:  pip install .
 ```
 
 ---
