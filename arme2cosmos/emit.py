@@ -422,9 +422,11 @@ class Emitter:
 
     def c_destroy_near(self, n: XmlNode) -> list[str]:
         kind = n.get("type", "all")
-        if n.get("name"):  # destroy near a named object -> no point known at convert time
-            self.note(f"destroy_near near object '{n.get('name')}': use that object's "
-                      f"position (a2x_destroy_near takes a point) -- wire by hand")
+        if n.get("name"):
+            # centered on a named object -> use its RUNTIME position if it is captured
+            var = self.symbols.get(n.get("name"))
+            if var is not None:
+                return [f'    a2x_destroy_near_object({var}, {n.get("radius", "0")}, "{kind}")']
             return [f"    # TODO destroy_near near \"{n.get('name')}\": {_xml_repr(n)}"]
         cx, cy, cz = self._xyz(n, "centerX", "centerY", "centerZ")
         return [f'    a2x_destroy_near({cx}, {cy}, {cz}, {n.get("radius", "0")}, "{kind}")']
