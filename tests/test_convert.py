@@ -629,5 +629,62 @@ class AmdQuestStructureTests(unittest.TestCase):
         self.assertNotIn("mark `Win:`", amd)  # kill-grouping TODO also neutralized
 
 
+DISTANCE_SAMPLE = """<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>distance</mission_description>
+  <start>
+    <create type="station" x="50000" y="0" z="50000" name="Base" raceKeys="TSN"/>
+    <create type="player" player_slot="0" x="10000" y="0" z="10000"/>
+  </start>
+  <event name="Close To Base">
+    <if_distance name1="Base" player_slot2="0" comparator="LESS" value="5000"/>
+    <set_variable name="near" value="1" integer="yes"/>
+  </event>
+  <event name="Far From Ghost">
+    <if_distance name1="Ghost" name2="Base" comparator="GREATER" value="9000"/>
+    <set_variable name="far" value="1" integer="yes"/>
+  </event>
+</mission_data>
+"""
+
+
+class DistanceConditionTests(unittest.TestCase):
+    """A two-object if_distance in a polling loop must use the guarded a2x helpers.
+
+    A raw ``sbs.distance_id`` crashes the engine ("was sent None") the moment either
+    handle is None -- an a2x_named miss, or an object that has been destroyed.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.xml = os.path.join(self.tmp.name, "MISS_Dist.xml")
+        with open(self.xml, "w", encoding="utf-8") as f:
+            f.write(DISTANCE_SAMPLE)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _story(self):
+        # a28_compatible: every event is a polling loop, so conditions go through
+        # the live-boolean path (_cond_bool) rather than the await path.
+        d = convert_file(self.xml, os.path.join(self.tmp.name, "out"),
+                         event_model="a28_compatible", target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_polling_distance_uses_guarded_helpers(self):
+        story = self._story()
+        self.assertIn("a2x_distance_less(", story)
+        self.assertIn("a2x_distance_greater(", story)
+
+    def test_no_raw_distance_id_emitted(self):
+        self.assertNotIn("sbs.distance_id", self._story())
+
+    def test_unresolved_name_still_goes_through_a_guarded_helper(self):
+        # "Ghost" is never created -> a2x_named(), which returns None at runtime.
+        story = self._story()
+        self.assertIn('a2x_distance_greater(a2x_named("Ghost")', story)
+
+
 if __name__ == "__main__":
     unittest.main()

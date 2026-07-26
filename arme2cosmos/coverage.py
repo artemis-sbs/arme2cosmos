@@ -103,7 +103,7 @@ _CONDITIONS = {
     "if_not_exists": Coverage(FULL, "not object_exists(id)"),
     "if_variable": Coverage(FULL, "plain python if"),
     "if_difficulty": Coverage(FULL, "plain python if"),
-    "if_distance": Coverage(FULL, "await distance_less/greater / sbs.distance_id"),
+    "if_distance": Coverage(FULL, "await distance_less/greater / a2x_distance_less/greater"),
     "if_inside_box": Coverage(FULL, "bounds check (corners via from2x_coord)"),
     "if_outside_box": Coverage(FULL, "bounds check"),
     "if_inside_sphere": Coverage(FULL, "distance_point_less"),

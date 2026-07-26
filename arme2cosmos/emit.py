@@ -936,8 +936,10 @@ def _resolve_obj(em: Emitter, name: str | None, slot: str | None) -> str:
         return em.symbols[name]
     if slot is not None or name is None:
         return em.player_var or 'role("__player__")'
-    # unknown name -> a runtime name->id lookup (None if absent). Safe in object_exists /
-    # distance_id, unlike a bare role(name) set which throws when passed as an id.
+    # unknown name -> a runtime name->id lookup (None if absent). Safe in object_exists and
+    # in the guarded a2x_distance_* / a2x_within helpers (they evaluate False for a missing
+    # object), unlike a bare role(name) set which throws when passed as an id. Never emit a
+    # raw sbs.distance_id with one of these -- the engine errors on None.
     return em.symbols.get(name) or f'a2x_named("{_mast_str(name)}")'
 
 
@@ -1038,7 +1040,13 @@ def _cond_bool(em: Emitter, n: XmlNode) -> str | None:
         less = _is_less(n.get("comparator"))
         if n.get("name2") or n.get("player_slot2"):
             b = _resolve_obj(em, n.get("name2"), n.get("player_slot2"))
-            return f"sbs.distance_id({a}, {b}) {'<' if less else '>'} {val}"
+            # a2x_distance_* (not a raw sbs.distance_id): either handle can be None
+            # (a2x_named miss, unset shared var) or a destroyed object's stale id, and
+            # the engine errors "sbs.distance_id was sent None" on those. The helpers
+            # evaluate False instead, matching 2.8 (a condition about a missing object
+            # never fires).
+            fn = "a2x_distance_less" if less else "a2x_distance_greater"
+            return f"{fn}({a}, {b}, {val})"
         px, py, pz = n.get("pointX", "0"), n.get("pointY", "0"), n.get("pointZ", "0")
         w = f"a2x_within({a}, {px}, {py}, {pz}, {val})"
         return w if less else f"not {w}"

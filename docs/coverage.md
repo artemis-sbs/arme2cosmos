@@ -67,7 +67,7 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 
 | 2.8 condition | Status | Cosmos |
 |---|---|---|
-| `if_distance` | **DONE** | `await distance_less/greater` (object or point) |
+| `if_distance` | **DONE** | `await distance_less/greater` (chain) / `a2x_distance_less/greater` (loops; object or point) |
 | `if_inside_sphere` / `if_outside_sphere` | **DONE** | `await distance_point_less/greater` (centre flipped) |
 | `if_inside_box` / `if_outside_box` | **DONE** | `a2x_in_box` guard |
 | `if_exists` / `if_not_exists` | **DONE** | live `object_exists` (loops) / `//damage/destroy` route (sole `if_not_exists` -> respawn) |
