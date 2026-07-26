@@ -888,8 +888,10 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     L.append("")
 
     L.append("    # --- start block ---")
-    from .convert import start_nodes
+    from .convert import start_nodes, _CONSOLE_ADDRESSED_START
     for n in start_nodes(mission):
+        if n.tag in _CONSOLE_ADDRESSED_START:
+            continue   # deferred to //shared/signal/game_started, same as the MAST target
         L.append(f"    # {_xml_one(n)}")
         L.extend(em.emit_command(n))
     L.append("")
@@ -983,6 +985,9 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
 
     # Same side declaration the MAST target emits -- spliced in ahead of the map now that
     # every sideValue the mission touches is known. See convert._create_sides_lines.
-    from .convert import _create_sides_lines, _map_label_index
+    from .convert import _create_sides_lines, _map_label_index, _game_started_lines
     L[_map_label_index(L):_map_label_index(L)] = _create_sides_lines(em)
+    # ...and the start block's console-addressed messages, which must wait for the crew to
+    # be at consoles or they are silently dropped. See convert._game_started_lines.
+    L += _game_started_lines(mission, em)
     return "\n".join(L) + "\n"
