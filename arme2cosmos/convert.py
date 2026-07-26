@@ -167,7 +167,7 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     }
 
     lines.append("    # --- start block ---")
-    for n in mission.start:
+    for n in start_nodes(mission):
         lines.append(f"    # {_xml_one(n)}")
         lines.extend(em.emit_command(n))
     lines.append("")
@@ -355,6 +355,25 @@ GM_GATE = "if has_roles(COMMS_ORIGIN_ID, 'gamemaster')"
 _CAPTURED_CREATES = {"create:station", "create:enemy", "create:neutral",
                      "create:monster", "create:whale", "create:genericMesh",
                      "create:Anomaly", "create:blackHole"}
+
+
+def start_nodes(mission: Mission) -> list:
+    """The start block's commands, with every `create type="player"` hoisted to the front.
+
+    In 2.8 the player ship ALREADY EXISTS when the mission loads -- the player picks it at
+    the console, and `create type="player"` only places and configures that ship. So a 2.8
+    start block may legitimately reference the player above its own create; MISS_Cruiser_
+    Tournament puts `set_player_carried_type` there. Cosmos has no such ship until we spawn
+    one, so emitting in source order left the reference resolving to nothing (the LM hangar
+    then crashed on `to_space_object(None).origin`).
+
+    Hoisting restores the 2.8 guarantee. It is safe: a player create depends on nothing but
+    its own coordinates, and relative order among the player creates (slot 0, 1, ...) is
+    preserved, as is the order of everything else.
+    """
+    players = [n for n in mission.start if n.kind_key() == "create:player"]
+    rest = [n for n in mission.start if n.kind_key() != "create:player"]
+    return players + rest
 
 
 def _side_value_of(n, em: Emitter) -> int:

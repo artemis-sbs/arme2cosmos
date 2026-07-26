@@ -164,6 +164,9 @@ class Emitter:
         self.addons: set[str] = set()  # feature-detected story.json mastlibs
         self.symbols: dict[str, str] = {}  # 2.8 object name -> MAST variable
         self.player_var: str | None = None  # MAST var holding the player ship
+        # whether the create:player line has been EMITTED yet. Before it, the variable
+        # is still the forward-declared None, so references resolve at runtime instead.
+        self.player_emitted = False
         # every 2.8 sideValue the mission touches (creates + runtime set_side_value), so
         # the emitted a2x_declare_sides covers each one; 2.8 declares no sides at all, and
         # an undeclared side means side_are_enemies is False and NPC brains never fire.
@@ -229,6 +232,24 @@ class Emitter:
 
     def _xyz(self, n: XmlNode, px="x", py="y", pz="z"):
         return (n.get(px, "0"), n.get(py, "0"), n.get(pz, "0"))
+
+    def _player_ref(self, n: XmlNode | None = None, slot=None) -> str | None:
+        """The MAST expression for "the player ship" AT THIS POINT in the emission.
+
+        `shared player_ship` is only assigned where the 2.8 `create type="player"` is
+        emitted, but 2.8 lets a command reference the player BEFORE that create -- e.g.
+        MISS_Cruiser_Tournament puts `set_player_carried_type` above it. Reading the
+        variable there gets the forward-declared None, which reaches the LM hangar as a
+        missing ship (`to_space_object(None)` -> `so.origin` crashes). So until the
+        create has been emitted, resolve the ship at RUNTIME by its 2.8 slot instead.
+        """
+        if self.player_var is None:
+            return None
+        if self.player_emitted:
+            return self.player_var
+        if slot is None and n is not None:
+            slot = n.get("player_slot")
+        return f"a2x_player_ship({_value(slot)})" if slot is not None else "a2x_player_ship(0)"
 
     def _note_side(self, value) -> str:
         """Record a 2.8 sideValue as one this mission uses, and return its Cosmos key.
@@ -322,6 +343,9 @@ class Emitter:
         # default: friendly stations carry the same 2.8 sideValue, and once diplomacy is
         # declared a player on a different side from its own station reads as hostile.
         side = self._side(n, _DEFAULT_PLAYER_SIDE)
+        # From here on `player_ship` holds a real id, so later references can use the
+        # variable; anything emitted ABOVE this line resolved the slot at runtime.
+        self.player_emitted = True
         return [f'    shared player_ship = a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", '
                 f'name="{nm}", side="{side}")']
 
@@ -507,7 +531,7 @@ class Emitter:
     def c_set_side_value(self, n: XmlNode) -> list[str]:
         obj = self.symbols.get(n.get("name"))
         if obj is None and n.get("player_slot") is not None:
-            obj = self.player_var
+            obj = self._player_ref(n)
         if obj is None:
             obj = self._gm_selected(n)
         if obj is None:
@@ -535,7 +559,7 @@ class Emitter:
         var = self.symbols.get(n.get("name"))
         # player_slot props (energy / count* / shieldState ... on the player) -> the player ship
         if var is None and n.get("player_slot") is not None:
-            var = self.player_var
+            var = self._player_ref(n)
         if var is None:
             var = self._gm_selected(n)  # use_gm_selection -> the GM's comms selection
         prop, val = n.get("property", "?"), n.get("value", "0")
@@ -608,7 +632,7 @@ class Emitter:
         msg = _mast_str(n.get("message", ""))
         ship = self.symbols.get(n.get("name"))
         if ship is None and n.get("player_slot") is not None:
-            ship = self.player_var
+            ship = self._player_ref(n)
         args = [f'"{msg}"']
         if n.get("consoles"):
             args.append(f'consoles="{n.get("consoles")}"')
@@ -639,10 +663,10 @@ class Emitter:
         # name1/name2 may instead be given as player_slot1/player_slot2 (the player ship)
         obj = self.symbols.get(n.get("name2"))
         if obj is None and n.get("player_slot2") is not None:
-            obj = self.player_var
+            obj = self._player_ref(n)
         ref = self.symbols.get(n.get("name1"))
         if ref is None and n.get("player_slot1") is not None:
-            ref = self.player_var
+            ref = self._player_ref(n)
         if obj is None or ref is None:
             return [f"    # TODO set_relative_position: {_xml_repr(n)}"]
         return [f"    a2x_set_relative_position({obj}, {ref}, "
@@ -651,7 +675,7 @@ class Emitter:
     def c_addto_object_property(self, n: XmlNode) -> list[str]:
         var = self.symbols.get(n.get("name"))
         if var is None and n.get("player_slot") is not None:
-            var = self.player_var
+            var = self._player_ref(n)
         if var is None:
             var = self._gm_selected(n)  # use_gm_selection -> the GM's comms selection
         prop, val = n.get("property", "?"), n.get("value", "0")
@@ -666,9 +690,9 @@ class Emitter:
     def c_copy_object_property(self, n: XmlNode) -> list[str]:
         src, dst = self.symbols.get(n.get("name1")), self.symbols.get(n.get("name2"))
         if src is None and n.get("player_slot1") is not None:
-            src = self.player_var
+            src = self._player_ref(n)
         if dst is None and n.get("player_slot2") is not None:
-            dst = self.player_var
+            dst = self._player_ref(n)
         prop = n.get("property", "?")
         if src is not None and dst is not None and prop in _AUTO_PROPS:
             return [f'    a2x_copy_object_property({src}, {dst}, "{prop}")']
@@ -711,7 +735,7 @@ class Emitter:
         # AND associates it with the ship). bay_slot is dropped. The craft is a real spawned
         # object, so CAPTURE it under its 2.8 name (and name it) when that name is referenced
         # elsewhere -- so set_relative_position / if_distance / add_ai targetName resolve.
-        ship = self.player_var
+        ship = self._player_ref(n)
         if ship is None and n.get("player_slot") is not None:
             # no explicit create:player -> resolve the 2.8 slot to the runtime player-ship ID
             ship = f'a2x_player_ship({_value(n.get("player_slot"))})'
@@ -785,7 +809,7 @@ class Emitter:
         # damcons are a ship-grid concept (player ships in Cosmos). Resolve the ship from
         # name/player_slot, defaulting to the player ship. value = the team's HP,
         # team_index 0..2 -> DC1..DC3. (No-ops on a non-player ship with no grid.)
-        ship = self.symbols.get(n.get("name")) or (self.player_var if n.get("player_slot") is not None else None) or self.player_var
+        ship = self.symbols.get(n.get("name")) or self._player_ref(n)
         if ship is None:
             return [f"    # TODO set_damcon_members: {_xml_repr(n)}"]
         return [f'    a2x_set_damcon_members({ship}, {_value(n.get("team_index", "0"))}, {_value(n.get("value", "0"))})']
@@ -837,7 +861,7 @@ class Emitter:
         return [f'    sbs.play_audio_file(0, get_mission_audio_file("{fn}"), 1.0, 1.0)']
 
     def c_grid_damage(self, n: XmlNode) -> list[str]:
-        ship = self.symbols.get(n.get("name")) or self.player_var or 'role("__player__")'
+        ship = self.symbols.get(n.get("name")) or self._player_ref(n) or 'role("__player__")'
         sysn = _GRID_SYS.get(n.get("systemType"))
         if sysn is None:
             return [f"    # TODO set_player_grid_damage systemType="
@@ -1011,7 +1035,7 @@ def _resolve_obj(em: Emitter, name: str | None, slot: str | None) -> str:
     if name and name in em.symbols:
         return em.symbols[name]
     if slot is not None or name is None:
-        return em.player_var or 'role("__player__")'
+        return em._player_ref(slot=slot) or 'role("__player__")'
     # unknown name -> a runtime name->id lookup (None if absent). Safe in object_exists and
     # in the guarded a2x_distance_* / a2x_within helpers (they evaluate False for a missing
     # object), unlike a bare role(name) set which throws when passed as an id. Never emit a
@@ -1030,7 +1054,7 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0) -> list[str]:
     if tag == "if_docked":
         who = _resolve_obj(em, n.get("name"), n.get("player_slot"))
         # which ship docks: the player (player_slot/name=player) -> player_var
-        ship = em.player_var or 'role("__player__")'
+        ship = em._player_ref(n) or 'role("__player__")'
         em.addons.add("docking")
         return [f"---wait_dock_{idx}",
                 "    await delay_sim(1)",
@@ -1099,7 +1123,7 @@ def _cond_bool(em: Emitter, n: XmlNode) -> str | None:
         return f'is_timer_finished(0, "{n.get("name")}")'
     if tag == "if_docked":
         em.addons.add("docking")
-        ship = em.player_var or 'role("__player__")'
+        ship = em._player_ref(n) or 'role("__player__")'
         return f"a2x_is_docked({ship})"
     if tag == "if_difficulty":
         op = _CMP_OP.get((n.get("comparator", "") or "").strip().upper(), "==")

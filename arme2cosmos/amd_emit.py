@@ -888,7 +888,8 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     L.append("")
 
     L.append("    # --- start block ---")
-    for n in mission.start:
+    from .convert import start_nodes
+    for n in start_nodes(mission):
         L.append(f"    # {_xml_one(n)}")
         L.extend(em.emit_command(n))
     L.append("")

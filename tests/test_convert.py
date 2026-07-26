@@ -141,6 +141,32 @@ class ConvertTests(unittest.TestCase):
         self.assertNotIn("PLAYER_LIST", story)
         self.assertEqual(story.count("a2x_create_player("), 1)
 
+    def test_player_create_is_hoisted_above_references_to_it(self):
+        # In 2.8 the player ship already EXISTS when the mission loads; `create
+        # type="player"` only places it. So a start block may reference the player above
+        # its own create (MISS_Cruiser_Tournament puts set_player_carried_type there).
+        # Cosmos has no such ship until we spawn one, so in source order the reference
+        # resolved to nothing and the LM hangar crashed on to_space_object(None).origin.
+        xml = os.path.join(self.tmp.name, "MISS_Carry.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Carry.</mission_description>
+  <start>
+    <set_player_carried_type player_slot="0" bay_slot="0" hullKeys="TSN Shuttle" name="Dagger"/>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+  </start>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        spawn = story.index("a2x_create_player(")
+        use = story.index("hangar_random_craft_spawn(")
+        self.assertLess(spawn, use, "player create must be emitted before it is referenced")
+        # and the reference resolves to the variable, not a not-yet-assigned forward decl
+        self.assertIn("hangar_random_craft_spawn(player_ship,", story)
+
     def test_sides_are_not_collapsed_onto_lm_keys(self):
         # 2.8 sideValue is a faction index, not a 3-valued enum: MISS_The_Arena puts
         # eight player ships on sideValues 4..11, each with its own station. Collapsing
@@ -219,6 +245,7 @@ class ConvertTests(unittest.TestCase):
         em.addons = set()
         em.symbols = {}
         em.player_var = "player_ship"
+        em.player_emitted = True   # these fixtures emit AFTER the create:player line
         s = em.c_set_object_property(XmlNode("set_object_property", {"property": "energy", "value": "1100", "player_slot": "0"}))
         self.assertEqual(s, ['    a2x_set_object_property(player_ship, "energy", 1100)'])
         a = em.c_addto_object_property(XmlNode("addto_object_property", {"property": "countEMP", "value": "2", "player_slot": "0"}))
@@ -234,6 +261,7 @@ class ConvertTests(unittest.TestCase):
         em.addons = set()
         em.symbols = {}
         em.player_var = "player_ship"
+        em.player_emitted = True   # these fixtures emit AFTER the create:player line
         out = em.c_set_player_carried_type(XmlNode("set_player_carried_type", {"player_slot": "0", "bay_slot": "0", "hullKeys": "singleseat TSN Bomber", "name": "Badger"}))
         self.assertEqual(out, ['    hangar_random_craft_spawn(player_ship, "bomber")'])
         self.assertIn("hangar", em.addons)
@@ -571,6 +599,7 @@ class ConvertCommsButtonTests(unittest.TestCase):
         from arme2cosmos.model import XmlNode
         em = Emitter.__new__(Emitter)
         em.notes, em.addons, em.symbols, em.player_var, em.hullmap = [], set(), {}, "player_ship", None
+        em.player_emitted = True   # emitting AFTER the create:player line
         self.assertEqual(em.c_log(XmlNode("log", {"text": 'hi "there"'}))[0],
                          '    log("hi \\"there\\"")')
         self.assertEqual(em.c_play_sound(XmlNode("play_sound_now", {"filename": "boom.wav"}))[0],
