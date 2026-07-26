@@ -11,7 +11,7 @@ import os
 import re
 
 from .emit import (Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _value,
-                   _side_key, _DEFAULT_PLAYER_SIDE)
+                   _side_key, _DEFAULT_PLAYER_SIDE, _AI_OVERRIDES_DEFAULT)
 from .model import Mission
 from .parser import parse_file
 
@@ -422,7 +422,8 @@ def _prescan_named_objects(mission: Mission, em: Emitter) -> None:
     # <add_ai> to override it. Record which ships get an explicit override so the rest
     # can be given the default (without it a converted enemy has no brain and sits inert).
     for n in mission.all_nodes():
-        if n.tag == "add_ai" and n.get("name"):
+        if (n.tag == "add_ai" and n.get("name")
+                and (n.get("type") or "").upper() in _AI_OVERRIDES_DEFAULT):
             em.explicit_ai_names.add(n.get("name"))
     # 2.8 named carried craft (set_player_carried_type) are real spawned hangar objects --
     # capture their names too, so later references (set_relative_position / if_distance /

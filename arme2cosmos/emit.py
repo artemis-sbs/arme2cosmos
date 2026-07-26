@@ -50,6 +50,13 @@ _AI_MAPPED = {"CHASE_PLAYER", "CHASE_STATION", "CHASE_AI_SHIP", "CHASE_NEUTRAL",
               "ATTACK", "TARGET_THROTTLE", "CHASE_FLEET", "CHASE_ANGER",
               "PROCEED_TO_EXIT"}
 
+# add_ai types that attach a real movement/targeting brain -- the ones that genuinely
+# REPLACE 2.8's implicit default enemy stack. Anything else (role grants like
+# FOLLOW_COMMS_ORDERS, the dropped leader blocks, unmapped types that emit only a TODO)
+# leaves the ship with no way to move, so such a ship must KEEP the default stack.
+# Getting this wrong is silent: the ship spawns, is re-brained on paper, and sits still.
+_AI_OVERRIDES_DEFAULT = _AI_MAPPED | {"DIR_THROTTLE", "POINT_THROTTLE"}
+
 # 2.8 AI blocks Cosmos handles structurally differently (or not at all) -> drop cleanly
 # rather than leave a TODO. Value is the reason emitted as a one-line comment.
 _AI_DROP = {

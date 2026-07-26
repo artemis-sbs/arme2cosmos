@@ -170,6 +170,31 @@ class ConvertTests(unittest.TestCase):
         self.assertIn("a2x_add_ai(obj_kr01", story)
         self.assertIn("a2x_default_enemy_ai(obj_kr02)", story)     # not overridden
 
+    def test_non_movement_add_ai_keeps_the_default_brain(self):
+        # Only an add_ai that attaches a real MOVEMENT/targeting brain replaces 2.8's
+        # default stack. FOLLOW_COMMS_ORDERS just grants orderable roles, and the leader
+        # blocks are dropped outright -- a ship with only those still needs the default,
+        # or it spawns "re-brained" on paper and sits perfectly still (44 ships in the
+        # corpus did exactly that).
+        xml = os.path.join(self.tmp.name, "MISS_Orders.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Orders.</mission_description>
+  <start>
+    <create type="enemy" x="1" y="0" z="2" name="KR01" sideValue="1"/>
+    <create type="enemy" x="3" y="0" z="4" name="KR02" sideValue="1"/>
+    <add_ai name="KR01" type="FOLLOW_COMMS_ORDERS"/>
+    <add_ai name="KR02" type="FOLLOW_LEADER"/>
+  </start>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertIn("a2x_default_enemy_ai(obj_kr01)", story)  # role grant is not a brain
+        self.assertIn("a2x_default_enemy_ai(obj_kr02)", story)  # dropped block is not a brain
+
     def test_baseline_addons_cover_what_2_8_gives_every_mission(self):
         # science_scans and basic_player_destroy are BASELINE, not feature-detected: 2.8
         # lets you scan anything and always ends the game when the player dies, so gating
