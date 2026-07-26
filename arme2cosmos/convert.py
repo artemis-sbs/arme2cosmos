@@ -425,6 +425,19 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
            "    # missing sim skips the colours SILENTLY, which looks exactly like broken",
            "    # diplomacy: correctly hostile ships drawn in the neutral colour.",
            "    a2x_set_diplomacy_colors()"]
+    if em.side_values:
+        # Re-declare the sides here as well as in //shared/signal/create_sides.
+        # declare_sides is idempotent, and the point is its ENGINE-side calls:
+        # sim.set_side_relationship (2D map / diplomacy shading) and
+        # sim.set_side_icon_color. Those do not stick when issued during
+        # create_sides, which the server console fires inside start_server -- the
+        # link graph survives (so every scripting-level check passes) while the
+        # engine's own tables stay at their defaults and contacts render gray.
+        # Verified: the icon colour was gray until re-applied after start.
+        out += ["    # Re-assert sides AFTER start: the engine-side relationship/colour",
+                "    # tables do not retain what create_sides set during start_server,",
+                "    # even though the scripting-level link graph does.",
+                f"    a2x_declare_sides({sorted(em.side_values)!r})"]
     if has_spares:
         # The mission spawned its own player ships at the 2.8 positions. Tag them so the
         # LegendaryMissions crew-select / loadout machinery treats them as the game's
