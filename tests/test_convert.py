@@ -144,8 +144,9 @@ class ConvertTests(unittest.TestCase):
         # 2.8 started with 8 crewable ships; the mission creates slot 0 and we fill the
         # rest -- all on the mission's OWN player side, so there is one declared side.
         self.assertEqual(story.count("a2x_create_player("), 8)
-        self.assertEqual(story.count('side="friendly"'),
-                         story.count("a2x_create_player(") + 1)  # + the friendly station
+        # slot 0 is the mission's own ship; the 7 spares carry the spare marker so
+        # game_started can drop them.
+        self.assertEqual(story.count('side="friendly, a2x_spare_player"'), 7)
         for nm in ("Artemis", "Intrepid", "Diana"):
             self.assertIn(f'name="{nm}"', story)
         self.assertNotIn('side="tsn"', story)
@@ -153,7 +154,7 @@ class ConvertTests(unittest.TestCase):
         # via spawn_players, which repositions ships near a friendly station and would
         # throw away the 2.8 spawn coordinates the mission actually specified.
         route = story[story.index("//shared/signal/game_started"):]
-        self.assertIn('add_role(role("__player__"), "default_player_ship")', route)
+        self.assertIn('delete_object(role("a2x_spare_player"))', route)
         # no CALL to spawn_players (the name appears in a comment explaining why not)
         for call in ("task_schedule(spawn_players", "await spawn_players", "\n    spawn_players("):
             self.assertNotIn(call, story)
@@ -247,6 +248,30 @@ class ConvertTests(unittest.TestCase):
             story = f.read()
         self.assertIn("a2x_default_enemy_ai(obj_kr01)", story)  # role grant is not a brain
         self.assertIn("a2x_default_enemy_ai(obj_kr02)", story)  # dropped block is not a brain
+
+    def test_mission_with_no_player_create_still_keeps_artemis(self):
+        # Turning PLAYER_CREATE_DEFAULT off meant a 2.8 mission that positions no player
+        # would have had NO player ship at all -- unplayable. The roster is still spawned
+        # for ship select, and game_started keeps Artemis (max(N,1)) rather than 0.
+        xml = os.path.join(self.tmp.name, "MISS_NoPlayer.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>No player.</mission_description>
+  <start>
+    <create type="station" x="1" y="0" z="2" name="DS1" sideValue="2"/>
+  </start>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertEqual(story.count("a2x_create_player("), 8)
+        # Artemis is kept; the other 7 are spares dropped at game_started
+        self.assertEqual(story.count('side="friendly, a2x_spare_player"'), 7)
+        artemis = [l for l in story.splitlines() if 'name="Artemis"' in l][0]
+        self.assertNotIn("a2x_spare_player", artemis)
+        self.assertIn('delete_object(role("a2x_spare_player"))', story)
 
     def test_baseline_addons_cover_what_2_8_gives_every_mission(self):
         # science_scans and basic_player_destroy are BASELINE, not feature-detected: 2.8

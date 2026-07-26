@@ -890,13 +890,17 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     L.append("    # --- start block ---")
     from .convert import start_nodes, _CONSOLE_ADDRESSED_START, _player_fill_lines
     _players = [n for n in start_nodes(mission) if n.kind_key() == "create:player"]
+    if not _players:
+        # No 2.8 player create at all -- spawn the roster up front so the mission is
+        # playable (game_started keeps Artemis and drops the spares).
+        L.extend(_player_fill_lines(em, _players, mission))
     for n in start_nodes(mission):
         if n.tag in _CONSOLE_ADDRESSED_START:
             continue   # deferred to //shared/signal/game_started, same as the MAST target
         L.append(f"    # {_xml_one(n)}")
         L.extend(em.emit_command(n))
         if _players and n is _players[-1]:
-            L.extend(_player_fill_lines(em, _players))
+            L.extend(_player_fill_lines(em, _players, mission))
     L.append("")
 
     if builder.roles:

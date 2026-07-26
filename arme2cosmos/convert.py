@@ -69,8 +69,26 @@ _DEFAULT_PLAYER_LIST = [
 # on one point.
 _PLAYER_FILL_SPACING = 1000
 
+# Where the roster goes when the mission positions nobody (2.8 map centre).
+_PLAYER_FILL_ORIGIN = (50000, 0, 50000)
 
-def _player_fill_lines(em: Emitter, players: list) -> list[str]:
+# Role marking a spawned player ship the mission did not ask for. All eight exist at
+# console-select so the crew can pick a hull; game_started then deletes the spares, so
+# play starts with exactly the ships the mission declared (or Artemis alone).
+_SPARE_PLAYER_ROLE = "a2x_spare_player"
+
+
+def _mission_player_creates(mission: Mission) -> list:
+    """Every ``create type="player"`` in the mission, not just the start block.
+
+    Some 2.8 missions spawn their crew from an EVENT (MISS_Medusa's_Maze does), so a
+    start-block-only view sees none and would wrongly conclude the mission has no player
+    ships -- adding a second, unwanted roster on top of the ones it makes later.
+    """
+    return [n for n in mission.all_nodes() if n.kind_key() == "create:player"]
+
+
+def _player_fill_lines(em: Emitter, players: list, mission: Mission | None = None) -> list[str]:
     """Spawn the player ships the 2.8 mission did not `create` itself.
 
     2.8 started every mission with eight crewable ships; a mission only `create`d the
@@ -82,22 +100,36 @@ def _player_fill_lines(em: Emitter, players: list) -> list[str]:
 
     They are laid out along Z from the last 2.8 player create so eight hulls do not stack.
     """
-    if not players or len(players) >= len(_DEFAULT_PLAYER_LIST):
+    if len(players) >= len(_DEFAULT_PLAYER_LIST):
         return []
-    last = players[-1]
-    try:
-        bx = float(last.get("x", "0")); by = float(last.get("y", "0")); bz = float(last.get("z", "0"))
-    except (TypeError, ValueError):
-        bx = by = bz = 0.0
+    # The mission makes its own crew somewhere (an event, not <start>) -- leave it alone.
+    if not players and mission is not None and _mission_player_creates(mission):
+        return []
+    if players:
+        last = players[-1]
+        try:
+            bx = float(last.get("x", "0")); by = float(last.get("y", "0")); bz = float(last.get("z", "0"))
+        except (TypeError, ValueError):
+            bx, by, bz = _PLAYER_FILL_ORIGIN
+    else:
+        # The mission positions nobody, so there is no reference point -- but a mission
+        # with no player ship at all is unplayable, and 2.8 always had a crew.
+        bx, by, bz = _PLAYER_FILL_ORIGIN
     # Mirror the name c_player actually emits, INCLUDING the slot-derived default for an
     # unnamed create -- otherwise the fill happily adds a second "Artemis".
     taken = {(n.get("name") or player_slot_name(n.get("player_slot", 0))).strip().lower()
              for n in players}
     side = _side_key(em.player_side if em.player_side is not None else _DEFAULT_PLAYER_SIDE)
-    out = [f"    # 2.8 always started with {len(_DEFAULT_PLAYER_LIST)} crewable ships; the mission "
-           f"created {len(players)}.",
-           "    # The rest are spawned here on the mission's OWN player side, not via",
-           "    # PLAYER_CREATE_DEFAULT (which would put them on \"tsn\" with no declared diplomacy)."]
+    # The mission's own ships are kept; if it made none, Artemis alone is kept so the
+    # mission is playable. Everything past that is a spare, marked at CREATION so
+    # game_started can delete it without having to work out which is which.
+    keep = max(len(players), 1)
+    out = [f"    # 2.8 always started with {len(_DEFAULT_PLAYER_LIST)} crewable ships; this mission "
+           f"positions {len(players)}.",
+           f"    # All {len(_DEFAULT_PLAYER_LIST)} exist for ship select; game_started deletes the",
+           f"    # spares, leaving the {keep} the mission actually declared. Spawned on the",
+           "    # mission's OWN player side -- PLAYER_CREATE_DEFAULT would use \"tsn\", a side",
+           "    # this mission never declares, so its diplomacy would be empty."]
     i = len(players)
     for spec in _DEFAULT_PLAYER_LIST:
         if spec["name"].strip().lower() in taken:
@@ -105,8 +137,9 @@ def _player_fill_lines(em: Emitter, players: list) -> list[str]:
         if i >= len(_DEFAULT_PLAYER_LIST):
             break
         z = bz + _PLAYER_FILL_SPACING * (i - len(players) + 1)
+        roles = side if i < keep else f"{side}, {_SPARE_PLAYER_ROLE}"
         out.append(f'    a2x_create_player({bx:g}, {by:g}, {z:g}, "{spec["ship"]}", '
-                   f'name="{spec["name"]}", side="{side}")')
+                   f'name="{spec["name"]}", side="{roles}")')
         i += 1
     return out
 
@@ -232,13 +265,17 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
 
     lines.append("    # --- start block ---")
     _players = [n for n in start_nodes(mission) if n.kind_key() == "create:player"]
+    if not _players:
+        # No 2.8 player create at all -- spawn the roster up front so the mission is
+        # playable (game_started keeps Artemis and drops the spares).
+        lines.extend(_player_fill_lines(em, _players, mission))
     for n in start_nodes(mission):
         if n.tag in _CONSOLE_ADDRESSED_START:
             continue   # deferred to //shared/signal/game_started (see _game_started_lines)
         lines.append(f"    # {_xml_one(n)}")
         lines.extend(em.emit_command(n))
         if _players and n is _players[-1]:
-            lines.extend(_player_fill_lines(em, _players))
+            lines.extend(_player_fill_lines(em, _players, mission))
     lines.append("")
 
     if em.scans:  # 2.8 set_ship_text scan_desc -> declarative science scans (scans.amd)
@@ -364,7 +401,12 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
     """
     nodes = [n for n in start_nodes(mission) if n.tag in _CONSOLE_ADDRESSED_START]
     players = [n for n in start_nodes(mission) if n.kind_key() == "create:player"]
-    if not nodes and not players:
+    # Spares exist whenever the mission positioned fewer than the full roster -- including
+    # when it positioned NONE, where the roster is spawned wholesale and only Artemis is
+    # kept. Keying this on `players` alone missed exactly that case.
+    has_spares = (len(players) < len(_DEFAULT_PLAYER_LIST)
+                  and not (not players and _mission_player_creates(mission)))
+    if not nodes and not has_spares:
         return []
     out = ["",
            "# 2.8 start-block messages, shown when play BEGINS rather than at map load.",
@@ -377,16 +419,17 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
            "    # an empty console set is discarded silently -- the card just never appears.",
            "    # One frame is enough in practice; a second gives margin for a slower client.",
            "    await delay_sim(1)"]
-    if players:
+    if has_spares:
         # The mission spawned its own player ships at the 2.8 positions. Tag them so the
         # LegendaryMissions crew-select / loadout machinery treats them as the game's
         # player ships. Deliberately NOT via spawn_players: that also repositions ships
         # near a friendly station, which would throw away the 2.8 spawn coordinates.
-        out += ["    # Our own player ships, spawned at the 2.8 positions. Tag them so the",
-                "    # LM crew-select / loadout machinery sees them -- but NOT via",
-                "    # spawn_players, which repositions ships and would discard those",
-                "    # positions.",
-                '    add_role(role("__player__"), "default_player_ship")']
+        out += [f"    # Ship select is over: drop the spare hulls, leaving the ships the",
+                f"    # mission declared. a2x_create_player already tagged every player ship",
+                f"    # default_player_ship at creation, so LM's crew-select / loadout",
+                f"    # machinery sees them without spawn_players (which would reposition",
+                f"    # them and discard the 2.8 spawn coordinates).",
+                f'    delete_object(role("{_SPARE_PLAYER_ROLE}"))']
     for n in nodes:
         out.append(f"    # {_xml_one(n)}")
         out.extend(em.emit_command(n))
