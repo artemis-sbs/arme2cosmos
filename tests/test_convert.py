@@ -189,6 +189,15 @@ class ConvertTests(unittest.TestCase):
         with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
             story = f.read()
         self.assertIn("//shared/signal/game_started", story)
+        # The route MUST yield a frame before messaging: server_console signals
+        # game_started while "consoles are waiting to be started", so the console pages
+        # do not exist yet and an empty audience is discarded silently. Verified in-game
+        # -- and invisible to the headless runner, which never has consoles, so nothing
+        # else in this suite can catch its removal.
+        route_head = story[story.index("//shared/signal/game_started"):]
+        self.assertLess(route_head.index("await delay_sim("),
+                        route_head.index("a2x_big_message"),
+                        "game_started must yield before addressing consoles")
         # the card is in the route, NOT in the map's start block
         start = story[story.index("--- start block ---"):story.index("//shared/signal/game_started")]
         self.assertNotIn("a2x_big_message", start)

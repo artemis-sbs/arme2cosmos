@@ -316,7 +316,13 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
            "# 2.8 start-block messages, shown when play BEGINS rather than at map load.",
            "# They address console clients, and an empty console set is silently ignored,",
            "# so firing them from the map task meant the crew never saw them.",
-           "//shared/signal/game_started"]
+           "//shared/signal/game_started",
+           "    # Yield first: the consoles server_console signals here are still coming up",
+           "    # ('Consoles are waiting to be started'), so this route runs before their",
+           "    # pages exist. Resolving the audience in that same frame finds nobody, and",
+           "    # an empty console set is discarded silently -- the card just never appears.",
+           "    # One frame is enough in practice; a second gives margin for a slower client.",
+           "    await delay_sim(1)"]
     for n in nodes:
         out.append(f"    # {_xml_one(n)}")
         out.extend(em.emit_command(n))
