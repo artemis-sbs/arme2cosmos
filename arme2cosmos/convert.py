@@ -418,7 +418,13 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
            "    # pages exist. Resolving the audience in that same frame finds nobody, and",
            "    # an empty console set is discarded silently -- the card just never appears.",
            "    # One frame is enough in practice; a second gives margin for a slower client.",
-           "    await delay_sim(1)"]
+           "    await delay_sim(1)",
+           "    # Re-apply the contact colours here as well as in a2x_declare_sides. The",
+           "    # sides are declared from //shared/signal/create_sides, which the server",
+           "    # console fires during start_server, where sim may not be live yet -- and a",
+           "    # missing sim skips the colours SILENTLY, which looks exactly like broken",
+           "    # diplomacy: correctly hostile ships drawn in the neutral colour.",
+           "    a2x_set_diplomacy_colors()"]
     if has_spares:
         # The mission spawned its own player ships at the 2.8 positions. Tag them so the
         # LegendaryMissions crew-select / loadout machinery treats them as the game's
