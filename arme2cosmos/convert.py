@@ -563,7 +563,10 @@ def build_description_yaml(mission: Mission) -> str:
     # production missions: format version, Category, Category Priority, Visible Mission
     # Name, Description, Keywords).
     disp = _display_name(mission)
-    desc = mission.description.replace("^", " ").replace("\n", " ").strip()
+    # One short line, NOT the 2.8 <mission_description>: that can run to paragraphs, and
+    # this field is a one-line blurb in the mission browser. The full 2.8 text is already
+    # the map's briefing in story.mast, so nothing is lost by keeping this to a label.
+    desc = f"A conversion of the Artemis 2.8 mission {disp}."
     # 2.8 has no keyword/category metadata; tag the port so it is findable in the list.
     return (f"format version: 1\n"
             f"Category: migrated 2.x\n"

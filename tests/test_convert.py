@@ -65,11 +65,12 @@ class ConvertTests(unittest.TestCase):
             self.assertIn(expected, keys, expected)
 
     def test_description_yaml_with_colon_is_valid(self):
-        # a 2.8 description containing ": " (e.g. "one thing: TROUBLE!") must not break YAML
+        # a name containing ": " and quotes must not break YAML (the browser blurb is built
+        # from the display name, which comes straight from the 2.8 filename)
         from arme2cosmos.convert import build_description_yaml
         from arme2cosmos.model import Mission
-        m = Mission(name="MISS_X", source_path="x.xml")
-        m.description = 'Uncover one thing: TROUBLE! The "best" crew wins.'
+        m = Mission(name='MISS_One_thing:_"TROUBLE"', source_path="x.xml")
+        m.description = "Long 2.8 briefing text that must NOT land here."
         text = build_description_yaml(m)
         # parse with the same yaml the engine uses
         try:
@@ -77,8 +78,21 @@ class ConvertTests(unittest.TestCase):
         except ImportError:
             self.skipTest("sbs_utils.yaml not importable in this environment")
         data = yaml.safe_load(text)
-        self.assertIn("TROUBLE", data["Description"])
+        self.assertIn("TROUBLE", data["Visible Mission Name"])
         self.assertEqual(data["Keywords"], "2.8 port")
+
+    def test_description_is_a_short_blurb_not_the_2_8_briefing(self):
+        # the browser blurb is one short line; the full 2.8 <mission_description> stays in
+        # story.mast as the map's briefing.
+        from arme2cosmos.convert import build_description_yaml
+        from arme2cosmos.model import Mission
+        m = Mission(name="MISS_Deep_Strike", source_path="x.xml")
+        m.description = "Paragraph one of a very long 2.8 briefing. " * 20
+        text = build_description_yaml(m)
+        line = [ln for ln in text.splitlines() if ln.startswith("Description:")][0]
+        self.assertNotIn("Paragraph one", line)
+        self.assertIn("A conversion of the Artemis 2.8 mission Deep Strike.", line)
+        self.assertLess(len(line), 100)
 
     def test_create_family_translated(self):
         _, story, _ = self._convert()
