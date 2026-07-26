@@ -182,6 +182,8 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
 
     lines.append("    # --- start block ---")
     for n in start_nodes(mission):
+        if n.tag in _CONSOLE_ADDRESSED_START:
+            continue   # deferred to //shared/signal/game_started (see _game_started_lines)
         lines.append(f"    # {_xml_one(n)}")
         lines.extend(em.emit_command(n))
     lines.append("")
@@ -293,7 +295,33 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     # Every sideValue the mission touches is known only now, so splice the side
     # declaration in ahead of the map (it must run before anything spawns).
     lines[_map_label_index(lines):_map_label_index(lines)] = _create_sides_lines(em)
+    lines += _game_started_lines(mission, em)
     return "\n".join(lines) + "\n"
+
+
+def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
+    """The ``//shared/signal/game_started`` route carrying the start block's
+    console-addressed messages.
+
+    A 2.8 mission opens with a big_message chapter card, and the converter emitted it
+    first in the map task -- which runs at map LOAD. Those calls resolve their audience
+    immediately, and an empty console set is a normal quiet case for the overlay layer,
+    so before the crew took consoles the card was discarded with no error at all. This
+    route fires once play actually begins, which is what 2.8's start block meant.
+    """
+    nodes = [n for n in start_nodes(mission) if n.tag in _CONSOLE_ADDRESSED_START]
+    if not nodes:
+        return []
+    out = ["",
+           "# 2.8 start-block messages, shown when play BEGINS rather than at map load.",
+           "# They address console clients, and an empty console set is silently ignored,",
+           "# so firing them from the map task meant the crew never saw them.",
+           "//shared/signal/game_started"]
+    for n in nodes:
+        out.append(f"    # {_xml_one(n)}")
+        out.extend(em.emit_command(n))
+    out.append("    ->END")
+    return out
 
 
 def _map_label_index(lines: list[str]) -> int:
@@ -369,6 +397,16 @@ GM_GATE = "if has_roles(COMMS_ORIGIN_ID, 'gamemaster')"
 _CAPTURED_CREATES = {"create:station", "create:enemy", "create:neutral",
                      "create:monster", "create:whale", "create:genericMesh",
                      "create:Anomaly", "create:blackHole"}
+
+
+# Start-block commands that address CONSOLE CLIENTS. They resolve their audience when
+# called, and the overlay / info-panel layers treat an empty console set as the normal
+# "nobody connected yet" case -- so they are dropped SILENTLY. Run at map load, before the
+# crew has taken consoles, they simply never appear. These are deferred to
+# //shared/signal/game_started, the point LegendaryMissions treats as "play has begun"
+# (autoplay, collisions, fleets and quest_driver all hook it).
+_CONSOLE_ADDRESSED_START = {"big_message", "incoming_comms_text", "warning_popup_message",
+                            "incoming_message"}
 
 
 def start_nodes(mission: Mission) -> list:

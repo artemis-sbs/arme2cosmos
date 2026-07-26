@@ -170,6 +170,33 @@ class ConvertTests(unittest.TestCase):
         self.assertIn("a2x_add_ai(obj_kr01", story)
         self.assertIn("a2x_default_enemy_ai(obj_kr02)", story)     # not overridden
 
+    def test_start_block_messages_wait_for_game_started(self):
+        # A console-addressed message resolves its audience when called, and an empty
+        # console set is silently ignored -- so a big_message fired from the map task (at
+        # map LOAD, before the crew take consoles) was discarded with no error at all.
+        xml = os.path.join(self.tmp.name, "MISS_Msg.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Msg.</mission_description>
+  <start>
+    <big_message title="Chapter One" subtitle1="by someone"/>
+    <create type="station" x="1" y="0" z="2" name="DS1" sideValue="2"/>
+  </start>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertIn("//shared/signal/game_started", story)
+        # the card is in the route, NOT in the map's start block
+        start = story[story.index("--- start block ---"):story.index("//shared/signal/game_started")]
+        self.assertNotIn("a2x_big_message", start)
+        route = story[story.index("//shared/signal/game_started"):]
+        self.assertIn('a2x_big_message("Chapter One"', route)
+        # spawns stay in the start block
+        self.assertIn("a2x_create_station", start)
+
     def test_non_movement_add_ai_keeps_the_default_brain(self):
         # Only an add_ai that attaches a real MOVEMENT/targeting brain replaces 2.8's
         # default stack. FOLLOW_COMMS_ORDERS just grants orderable roles, and the leader
