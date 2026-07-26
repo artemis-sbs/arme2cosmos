@@ -436,8 +436,11 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
         # Verified: the icon colour was gray until re-applied after start.
         out += ["    # Re-assert sides AFTER start: the engine-side relationship/colour",
                 "    # tables do not retain what create_sides set during start_server,",
-                "    # even though the scripting-level link graph does.",
-                f"    a2x_declare_sides({sorted(em.side_values)!r})"]
+                "    # even though the scripting-level link graph does. One re-assert at",
+                "    # ~1s proved too early in-engine (contacts stayed grey); the same",
+                "    # calls at ~3s took. Rather than bet on one delay, re-assert a few",
+                "    # times over the first seconds -- it is idempotent and cheap.",
+                "    task_schedule(a2x_reassert_sides)"]
     if has_spares:
         # The mission spawned its own player ships at the 2.8 positions. Tag them so the
         # LegendaryMissions crew-select / loadout machinery treats them as the game's
@@ -453,6 +456,24 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
         out.append(f"    # {_xml_one(n)}")
         out.extend(em.emit_command(n))
     out.append("    ->END")
+    if has_spares or em.side_values:
+        pass
+    if em.side_values:
+        vals = sorted(em.side_values)
+        out += ["",
+                "# The engine's side relationship / icon-colour tables do not retain what",
+                "# create_sides wrote during start_server, and a single re-assert just after",
+                "# game_started is still too early. Re-apply over the first few seconds; both",
+                "# calls are idempotent, so the repeats cost nothing once they have taken.",
+                "=== a2x_reassert_sides",
+                "    _n = 0",
+                "---a2x_reassert_loop",
+                "    await delay_sim(1)",
+                f"    a2x_declare_sides({vals!r})",
+                "    a2x_set_diplomacy_colors()",
+                "    _n = _n + 1",
+                "    jump a2x_reassert_loop if _n < 6",
+                "    ->END"]
     return out
 
 
