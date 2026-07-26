@@ -386,6 +386,10 @@ class Emitter:
 
     def c_black_hole(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
+        # The LM collisions addon carries the black-hole lethal-proximity watcher: the
+        # engine's own maelstrom collision does not reliably fire, so without it a ship
+        # can sit in the well (or warp free) and SURVIVE a black hole.
+        self.addons.add("collisions")
         return [self._assign(n, f"a2x_create_black_hole({x}, {y}, {z})")]
 
     def c_terrain(self, n: XmlNode) -> list[str]:
@@ -407,6 +411,12 @@ class Emitter:
         if fn is None:
             return [f"    # TODO create type={kind}: {_xml_repr(n)}"]
         nt = f", neb_type={n.get('nebType')}" if (kind == "nebulas" and n.get("nebType")) else ""
+        if kind in ("asteroids", "mines"):
+            # Impact damage (shields -> hull -> grid internal damage) and asteroid
+            # destruction live in the LM collisions addon; without it flying into a
+            # 2.8 mine/asteroid field is harmless. Nebulas are pass-through, so they
+            # do not need it.
+            self.addons.add("collisions")
         return [f"    {fn}({count}, {start}{end}{radius}{rng}{seed}{nt})"]
 
     def c_set_variable(self, n: XmlNode) -> list[str]:

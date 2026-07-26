@@ -15,9 +15,23 @@ from .emit import (Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _val
 from .model import Mission
 from .parser import parse_file
 
-# Baseline gameplay addons (a gameplay port needs at least consoles); extras are
-# feature-detected by the Emitter (e.g. upgrades when anomalies are present).
-_BASELINE_ADDONS = ["consoles", "docking", "comms", "damage", "prefabs", "fleets"]
+# Baseline gameplay addons; extras are feature-detected by the Emitter (e.g. upgrades
+# when anomalies are present, collisions when there is terrain to hit).
+#
+# The first six are LegendaryMissions' own recommended set for "a standard multi-console
+# combat mission" (see its addons/index.md), which is what a converted 2.8 mission is.
+# The last two are baseline because 2.8 gives them to EVERY mission for free, so gating
+# them on a source feature leaves a converted mission quietly missing them:
+#   science_scans      -- `consoles` provides the Science console, but the scan RESPONSE
+#                         routes live here. In 2.8 you can scan anything, so keying this
+#                         off the source happening to set `set_ship_text scan_desc` left
+#                         most missions with a Science console that answers nothing.
+#   basic_player_destroy -- owns //shared/signal/player_ship_destroyed: deletes the ship,
+#                         announces the loss, ends the game when the last player dies, and
+#                         reassigns orphaned clients. Without it a 2.8 "you were destroyed"
+#                         event fires but the game never ends and the crew sits on a wreck.
+_BASELINE_ADDONS = ["consoles", "docking", "comms", "damage", "prefabs", "fleets",
+                    "science_scans", "basic_player_destroy"]
 # Library version tag the generated story.json references. Matches the libs shipped
 # in the missions __lib__ folder; override with `convert --lib-version`.
 DEFAULT_LIB_VERSION = "v1.4.0"

@@ -85,6 +85,30 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 
 ---
 
+## Addons (`story.json`)
+
+LegendaryMissions' own guidance is "load only the addons you use", and its recommended
+set for *a standard multi-console combat mission* -- which is what a converted 2.8
+mission is -- is `fleets, docking, prefabs, comms, consoles, damage`. Those are the
+baseline. The rest are feature-detected as the emitters encounter the need (`upgrades`
+for pickups, `hangar` for carried craft, `gamemaster*` for GM buttons, ...).
+
+Two more are baseline **because 2.8 gives them to every mission for free**, so keying
+them off a source feature silently leaves a converted mission missing them:
+
+| Addon | Why baseline |
+|---|---|
+| `science_scans` | `consoles` supplies the Science *console*; the scan RESPONSE routes live here. In 2.8 you can scan anything, so gating this on the source happening to use `set_ship_text scan_desc` left most missions with a Science console that answers nothing. |
+| `basic_player_destroy` | Owns `//shared/signal/player_ship_destroyed`: deletes the ship, announces the loss, ends the game when the last player dies, and reassigns orphaned clients. Without it a 2.8 "you were destroyed" event fires but the mission never ends and the crew sits on a wreck. |
+
+And one feature-detected addon is easy to miss because the need is implicit in terrain:
+
+| Addon | Detected on |
+|---|---|
+| `collisions` | any `create` of **asteroids / mines / blackHole**. It implements the impact model (shields -> hull -> `grid_take_internal_damage_at`) *and* the black-hole lethal-proximity watcher -- the engine's own maelstrom collision does not reliably fire, so without it a ship can sit in the well and **survive a black hole**. Nebulas are pass-through and do not trigger it. |
+
+---
+
 ## Sides and diplomacy
 
 2.8 has **no diplomacy table**. A ship's `sideValue` *is* its faction, and the engine

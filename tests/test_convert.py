@@ -141,6 +141,37 @@ class ConvertTests(unittest.TestCase):
         self.assertNotIn("PLAYER_LIST", story)
         self.assertEqual(story.count("a2x_create_player("), 1)
 
+    def test_baseline_addons_cover_what_2_8_gives_every_mission(self):
+        # science_scans and basic_player_destroy are BASELINE, not feature-detected: 2.8
+        # lets you scan anything and always ends the game when the player dies, so gating
+        # them on a source feature left converted missions with a Science console that
+        # answers nothing and a player death that never ends the mission.
+        _, _, sjson = self._convert()
+        for addon in ("consoles", "docking", "comms", "damage", "prefabs", "fleets",
+                      "science_scans", "basic_player_destroy"):
+            self.assertIn(f"LegendaryMissions.{addon}.", sjson, addon)
+
+    def test_collisions_added_for_terrain_and_black_holes(self):
+        # The LM collisions addon owns asteroid/mine impact damage AND the black-hole
+        # lethal-proximity watcher (the engine's own maelstrom collision does not
+        # reliably fire, so a ship can otherwise survive a black hole).
+        _, _, sjson = self._convert()   # SAMPLE has an asteroid field
+        self.assertIn("LegendaryMissions.collisions.", sjson)
+        # nebulas are pass-through -- they alone should NOT pull it in
+        xml = os.path.join(self.tmp.name, "MISS_Neb.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Neb.</mission_description>
+  <start>
+    <create count="5" type="nebulas" startX="1" startY="0" startZ="2"/>
+  </start>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.json"), encoding="utf-8") as f:
+            self.assertNotIn("LegendaryMissions.collisions.", f.read())
+
     def test_player_create_is_hoisted_above_references_to_it(self):
         # In 2.8 the player ship already EXISTS when the mission loads; `create
         # type="player"` only places it. So a start block may reference the player above
