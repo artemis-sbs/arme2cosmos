@@ -149,6 +149,14 @@ class ConvertTests(unittest.TestCase):
         for nm in ("Artemis", "Intrepid", "Diana"):
             self.assertIn(f'name="{nm}"', story)
         self.assertNotIn('side="tsn"', story)
+        # Tagged in game_started so LM's crew-select / loadout machinery sees them. NOT
+        # via spawn_players, which repositions ships near a friendly station and would
+        # throw away the 2.8 spawn coordinates the mission actually specified.
+        route = story[story.index("//shared/signal/game_started"):]
+        self.assertIn('add_role(role("__player__"), "default_player_ship")', route)
+        # no CALL to spawn_players (the name appears in a comment explaining why not)
+        for call in ("task_schedule(spawn_players", "await spawn_players", "\n    spawn_players("):
+            self.assertNotIn(call, story)
 
     def test_enemies_get_2_8_implicit_default_brain(self):
         # 2.8 gives every enemy a brain stack from the engine; a mission writes <add_ai>

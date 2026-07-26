@@ -363,7 +363,8 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
     route fires once play actually begins, which is what 2.8's start block meant.
     """
     nodes = [n for n in start_nodes(mission) if n.tag in _CONSOLE_ADDRESSED_START]
-    if not nodes:
+    players = [n for n in start_nodes(mission) if n.kind_key() == "create:player"]
+    if not nodes and not players:
         return []
     out = ["",
            "# 2.8 start-block messages, shown when play BEGINS rather than at map load.",
@@ -376,6 +377,16 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
            "    # an empty console set is discarded silently -- the card just never appears.",
            "    # One frame is enough in practice; a second gives margin for a slower client.",
            "    await delay_sim(1)"]
+    if players:
+        # The mission spawned its own player ships at the 2.8 positions. Tag them so the
+        # LegendaryMissions crew-select / loadout machinery treats them as the game's
+        # player ships. Deliberately NOT via spawn_players: that also repositions ships
+        # near a friendly station, which would throw away the 2.8 spawn coordinates.
+        out += ["    # Our own player ships, spawned at the 2.8 positions. Tag them so the",
+                "    # LM crew-select / loadout machinery sees them -- but NOT via",
+                "    # spawn_players, which repositions ships and would discard those",
+                "    # positions.",
+                '    add_role(role("__player__"), "default_player_ship")']
     for n in nodes:
         out.append(f"    # {_xml_one(n)}")
         out.extend(em.emit_command(n))
