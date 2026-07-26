@@ -11,7 +11,8 @@ import os
 import re
 
 from .emit import (Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _value,
-                   _side_key, _DEFAULT_PLAYER_SIDE, _AI_OVERRIDES_DEFAULT)
+                   _side_key, _DEFAULT_PLAYER_SIDE, _AI_OVERRIDES_DEFAULT,
+                   player_slot_name)
 from .model import Mission
 from .parser import parse_file
 
@@ -47,33 +48,82 @@ def _display_name(mission: Mission) -> str:
     return re.sub(r"^MISS_", "", mission.name).replace("_", " ")
 
 
-# The Cosmos default player ships (mirrors the LM settings.yaml PLAYER_LIST). Used when a
-# 2.8 mission creates no player ship of its own -- in 2.8 the player picks a ship, so many
-# missions never `create` one. A single flagship is the faithful default for a converted
-# solo mission; add rows here (up to 2.8 slots 0-7) to seat more player ships.
+# The eight ships 2.8 always gave a crew, matching LegendaryMissions' own PLAYER_LIST
+# names and hulls. A 2.8 mission usually `create`s only the slots it cares about (often
+# just slot 0) but the game still started with all eight, so a faithful conversion spawns
+# the rest itself. It does NOT delegate to LM's PLAYER_CREATE_DEFAULT: those ships are
+# built on side "tsn", which is not the mission's player side, so the crew ended up on a
+# ship with no declared diplomacy -- hostiles read as neutral and nothing shot at them.
 _DEFAULT_PLAYER_LIST = [
-    {"name": "Artemis", "side": "tsn", "ship": "tsn_battle_cruiser", "face": "terran"},
+    {"name": "Artemis", "ship": "tsn_light_cruiser"},
+    {"name": "Intrepid", "ship": "tsn_battle_cruiser"},
+    {"name": "Aegis", "ship": "tsn_battle_cruiser"},
+    {"name": "Horatio", "ship": "tsn_battle_cruiser"},
+    {"name": "Excalibur", "ship": "tsn_battle_cruiser"},
+    {"name": "Hera", "ship": "tsn_battle_cruiser"},
+    {"name": "Ceres", "ship": "tsn_battle_cruiser"},
+    {"name": "Diana", "ship": "tsn_battle_cruiser"},
 ]
+
+# How far apart the filled-in player ships sit (2.8 units), so eight hulls do not stack
+# on one point.
+_PLAYER_FILL_SPACING = 1000
+
+
+def _player_fill_lines(em: Emitter, players: list) -> list[str]:
+    """Spawn the player ships the 2.8 mission did not `create` itself.
+
+    2.8 started every mission with eight crewable ships; a mission only `create`d the
+    slots it positioned. Cosmos has whatever we spawn, so the remaining slots are filled
+    here -- on the MISSION'S player side, which is the whole point: LegendaryMissions'
+    PLAYER_CREATE_DEFAULT builds them on "tsn", and a crew that took one of those was on
+    a side the mission never declared, so its diplomacy was empty (enemies neutral, no
+    one hostile). Names and hulls match LM's PLAYER_LIST so the ship select reads the same.
+
+    They are laid out along Z from the last 2.8 player create so eight hulls do not stack.
+    """
+    if not players or len(players) >= len(_DEFAULT_PLAYER_LIST):
+        return []
+    last = players[-1]
+    try:
+        bx = float(last.get("x", "0")); by = float(last.get("y", "0")); bz = float(last.get("z", "0"))
+    except (TypeError, ValueError):
+        bx = by = bz = 0.0
+    # Mirror the name c_player actually emits, INCLUDING the slot-derived default for an
+    # unnamed create -- otherwise the fill happily adds a second "Artemis".
+    taken = {(n.get("name") or player_slot_name(n.get("player_slot", 0))).strip().lower()
+             for n in players}
+    side = _side_key(em.player_side if em.player_side is not None else _DEFAULT_PLAYER_SIDE)
+    out = [f"    # 2.8 always started with {len(_DEFAULT_PLAYER_LIST)} crewable ships; the mission "
+           f"created {len(players)}.",
+           "    # The rest are spawned here on the mission's OWN player side, not via",
+           "    # PLAYER_CREATE_DEFAULT (which would put them on \"tsn\" with no declared diplomacy)."]
+    i = len(players)
+    for spec in _DEFAULT_PLAYER_LIST:
+        if spec["name"].strip().lower() in taken:
+            continue
+        if i >= len(_DEFAULT_PLAYER_LIST):
+            break
+        z = bz + _PLAYER_FILL_SPACING * (i - len(players) + 1)
+        out.append(f'    a2x_create_player({bx:g}, {by:g}, {z:g}, "{spec["ship"]}", '
+                   f'name="{spec["name"]}", side="{side}")')
+        i += 1
+    return out
 
 
 def _player_default_lines(em: Emitter) -> list[str]:
-    """MAST header lines that control default player-ship creation. A mission that creates
-    its own player keeps PLAYER_CREATE_DEFAULT False; one that doesn't gets the Cosmos
-    default ships built from PLAYER_LIST (via the server console's create_default_player_ships).
-    Set as plain globals so they win over the console's ``default shared ... = SETTINGS.get``."""
-    if em.player_var is not None:
-        return ["PLAYER_CREATE_DEFAULT = False"]
-    # No 2.8 player create -> let the server console build the defaults, but on the
-    # mission's OWN player side (2.8 sideValue 2), not a2x/LM's "tsn": friendly stations
-    # carry that sideValue, and the two must match once diplomacy is declared.
-    side = _side_key(_DEFAULT_PLAYER_SIDE)
-    em.side_values.add(_DEFAULT_PLAYER_SIDE)
-    out = ["# 2.8 created no player ship (the player picks one in 2.8) -- build Cosmos defaults.",
-           "PLAYER_CREATE_DEFAULT = True",
-           "PLAYER_LIST = ["]
-    out += [f"    {dict(s, side=side)!r}," for s in _DEFAULT_PLAYER_LIST]
-    out.append("]")
-    return out
+    """Turn LegendaryMissions' default player-ship creation OFF, always.
+
+    Those ships are built on side ``"tsn"``, which is not the mission's player side. A
+    crew that took one was on a side the mission never declared, so its diplomacy was
+    empty -- hostiles rendered neutral and nothing treated the ship as an enemy. The
+    converter spawns every player ship itself instead, on the mission's own side (see
+    :func:`_player_fill_lines`), so there is one player side and it is a declared one.
+    """
+    em.side_values.add(em.player_side if em.player_side is not None else _DEFAULT_PLAYER_SIDE)
+    return ["# Player ships are spawned by this mission on its OWN side; LegendaryMissions'",
+            "# defaults would build them on \"tsn\", a side this mission never declares.",
+            "PLAYER_CREATE_DEFAULT = False"]
 
 
 def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid") -> str:
@@ -181,11 +231,14 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     }
 
     lines.append("    # --- start block ---")
+    _players = [n for n in start_nodes(mission) if n.kind_key() == "create:player"]
     for n in start_nodes(mission):
         if n.tag in _CONSOLE_ADDRESSED_START:
             continue   # deferred to //shared/signal/game_started (see _game_started_lines)
         lines.append(f"    # {_xml_one(n)}")
         lines.extend(em.emit_command(n))
+        if _players and n is _players[-1]:
+            lines.extend(_player_fill_lines(em, _players))
     lines.append("")
 
     if em.scans:  # 2.8 set_ship_text scan_desc -> declarative science scans (scans.amd)

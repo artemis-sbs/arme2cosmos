@@ -160,6 +160,21 @@ _STATION_ART = "starbase_command"
 _ENEMY_ART = "kralien_cruiser"
 _NEUTRAL_ART = "transport"
 _PLAYER_ART = "tsn_light_cruiser"
+
+# 2.8 player_slot -> the ship that slot has always been, matching LegendaryMissions'
+# PLAYER_LIST. A 2.8 <create type="player"> is usually unnamed because the slot already
+# implies the ship, so naming by slot (rather than calling every unnamed create
+# "Artemis") keeps slots distinct and lets convert fill the ones the mission omitted.
+_PLAYER_SLOT_NAMES = ["Artemis", "Intrepid", "Aegis", "Horatio",
+                      "Excalibur", "Hera", "Ceres", "Diana"]
+
+
+def player_slot_name(slot):
+    """The default ship name for a 2.8 ``player_slot`` (slot 0 -> Artemis)."""
+    try:
+        return _PLAYER_SLOT_NAMES[int(float(slot))]
+    except (TypeError, ValueError, IndexError):
+        return _PLAYER_SLOT_NAMES[0]
 _MONSTER_ART = "monster_charbdis"
 
 
@@ -358,7 +373,7 @@ class Emitter:
         self.addons.update({"consoles", "fleets"})
         self.note("player ship: a2x_create_player is a scaffold; prefer the consoles/"
                   "fleets addon (PLAYER_LIST + spawn_players) for real console wiring")
-        nm = _mast_str(n.get("name") or "Artemis")
+        nm = _mast_str(n.get("name") or player_slot_name(n.get("player_slot", 0)))
         self.player_var = "player_ship"
         if n.get("name"):
             self._var_for(n.get("name"))  # also resolvable by name

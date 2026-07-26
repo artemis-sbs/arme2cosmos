@@ -137,9 +137,18 @@ class ConvertTests(unittest.TestCase):
         # player_var None -- the header then asked LM to build a ship from PLAYER_LIST
         # *and* the body spawned one, giving two Artemis.
         _, story, _ = self._convert()
+        # LM's defaults are always off: they build on side "tsn", which the mission never
+        # declares, so a crew that took one had empty diplomacy (enemies read neutral).
         self.assertIn("PLAYER_CREATE_DEFAULT = False", story)
-        self.assertNotIn("PLAYER_LIST", story)
-        self.assertEqual(story.count("a2x_create_player("), 1)
+        self.assertNotIn("PLAYER_CREATE_DEFAULT = True", story)
+        # 2.8 started with 8 crewable ships; the mission creates slot 0 and we fill the
+        # rest -- all on the mission's OWN player side, so there is one declared side.
+        self.assertEqual(story.count("a2x_create_player("), 8)
+        self.assertEqual(story.count('side="friendly"'),
+                         story.count("a2x_create_player(") + 1)  # + the friendly station
+        for nm in ("Artemis", "Intrepid", "Diana"):
+            self.assertIn(f'name="{nm}"', story)
+        self.assertNotIn('side="tsn"', story)
 
     def test_enemies_get_2_8_implicit_default_brain(self):
         # 2.8 gives every enemy a brain stack from the engine; a mission writes <add_ai>
