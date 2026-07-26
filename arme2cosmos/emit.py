@@ -175,6 +175,9 @@ class Emitter:
         # objects share it, so it must not be hardcoded -- a player on a different side
         # from its own station reads as hostile once diplomacy is declared.
         self.player_side: int | None = None
+        # 2.8 object names that get an explicit <add_ai> override (populated by prescan).
+        # Everything else that spawns as an enemy needs 2.8's implicit default brain.
+        self.explicit_ai_names: set[str] = set()
         # flags consumed by a //signal-converted event: set_variable on these also
         # emits the signal that drives the route (set by build_story_mast).
         self.signal_flags: set[str] = set()
@@ -320,8 +323,22 @@ class Emitter:
         if art == _ENEMY_ART:
             self.note(f"verify enemy art for {n.get('name','?')} "
                       f"(hullID={n.get('hullID')} race={n.get('raceKeys')})")
-        return [self._assign(n, f'a2x_create_enemy({x}, {y}, {z}, "{art}", '
-                f'side="{side}"{self._name_kw(n)})')]
+        expr = (f'a2x_create_enemy({x}, {y}, {z}, "{art}", '
+                f'side="{side}"{self._name_kw(n)})')
+        # 2.8 enemies get their brain stack from the ENGINE -- a mission writes <add_ai>
+        # only to OVERRIDE it. Nothing carried that over, so a converted enemy spawned
+        # with no brain and just sat there. Give 2.8's default to every enemy the mission
+        # does not explicitly re-brain (a ship with its own add_ai keeps only that, so the
+        # two brain stacks can't fight each other).
+        name = n.get("name")
+        if name in self.explicit_ai_names:
+            return [self._assign(n, expr)]
+        self.addons.add("ai")   # the default brain's labels live in the LM ai addon
+        if name:
+            var = self._var_for(name)
+            return [f"    shared {var} = {expr}", f"    a2x_default_enemy_ai({var})"]
+        # unnamed: no variable to hold it, so brain the id the spawn returns
+        return [f"    a2x_default_enemy_ai({expr})"]
 
     def c_neutral(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)

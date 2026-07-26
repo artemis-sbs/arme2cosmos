@@ -141,6 +141,35 @@ class ConvertTests(unittest.TestCase):
         self.assertNotIn("PLAYER_LIST", story)
         self.assertEqual(story.count("a2x_create_player("), 1)
 
+    def test_enemies_get_2_8_implicit_default_brain(self):
+        # 2.8 gives every enemy a brain stack from the engine; a mission writes <add_ai>
+        # only to override it. Without carrying that over, a converted enemy spawned with
+        # no brain and sat inert -- the "AI doesn't work" report.
+        _, story, sjson = self._convert()
+        self.assertIn("a2x_default_enemy_ai(obj_kr01)", story)
+        self.assertIn("LegendaryMissions.ai.", sjson)   # the brain labels live there
+
+    def test_explicit_add_ai_suppresses_the_default_brain(self):
+        # A ship the mission re-brains keeps ONLY its own stack, so the two can't fight.
+        xml = os.path.join(self.tmp.name, "MISS_Ai.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Ai.</mission_description>
+  <start>
+    <create type="enemy" x="1" y="0" z="2" name="KR01" sideValue="1"/>
+    <create type="enemy" x="3" y="0" z="4" name="KR02" sideValue="1"/>
+    <add_ai name="KR01" type="CHASE_STATION"/>
+  </start>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertNotIn("a2x_default_enemy_ai(obj_kr01)", story)  # overridden
+        self.assertIn("a2x_add_ai(obj_kr01", story)
+        self.assertIn("a2x_default_enemy_ai(obj_kr02)", story)     # not overridden
+
     def test_baseline_addons_cover_what_2_8_gives_every_mission(self):
         # science_scans and basic_player_destroy are BASELINE, not feature-detected: 2.8
         # lets you scan anything and always ends the game when the player dies, so gating

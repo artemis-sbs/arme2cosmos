@@ -418,6 +418,12 @@ def _prescan_named_objects(mission: Mission, em: Emitter) -> None:
             continue
         if n.get("name") and kind in _CAPTURED_CREATES:
             em._var_for(n.get("name"))
+    # 2.8 gives EVERY enemy an implicit default brain stack; a mission only writes
+    # <add_ai> to override it. Record which ships get an explicit override so the rest
+    # can be given the default (without it a converted enemy has no brain and sits inert).
+    for n in mission.all_nodes():
+        if n.tag == "add_ai" and n.get("name"):
+            em.explicit_ai_names.add(n.get("name"))
     # 2.8 named carried craft (set_player_carried_type) are real spawned hangar objects --
     # capture their names too, so later references (set_relative_position / if_distance /
     # add_ai targetName) resolve to the spawned craft.
