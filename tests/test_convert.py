@@ -104,8 +104,90 @@ class ConvertTests(unittest.TestCase):
 
     def test_fleet_count_becomes_await_destroyed(self):
         _, story, _ = self._convert()
-        self.assertIn('side="enemy, fleet_1"', story)
+        # side KEY first (identity + diplomacy), then the combat-scope role, then the
+        # fleet role -- spawn_common splits on commas and adds every entry as a role.
+        self.assertIn('side="enemy, raider, fleet_1"', story)
         self.assertIn('await destroyed_all(role("fleet_1"))', story)
+
+    def test_sides_declared_in_create_sides_route(self):
+        # 2.8 declares no sides; Cosmos needs them or side_are_enemies is always False
+        # (and the LM npc brains gate firing on exactly that). One side per distinct
+        # sideValue the mission touches, declared before anything spawns.
+        _, story, _ = self._convert()
+        self.assertIn("//shared/signal/create_sides", story)
+        self.assertIn("a2x_declare_sides([1, 2])", story)
+        # must come BEFORE the map: the server console fires it during start_server,
+        # ahead of default player ships and any map.
+        self.assertLess(story.index("//shared/signal/create_sides"), story.index("@map/"))
+        # the route runs inline in the server-start task -- an ->END would end the caller.
+        route = story[story.index("//shared/signal/create_sides"):story.index("@map/")]
+        self.assertNotIn("->END", route)
+
+    def test_player_and_friendly_station_share_a_side(self):
+        # both carry 2.8 sideValue 2. If the player kept a2x_create_player's "tsn"
+        # default it would be on a different side from its own station -- and once
+        # diplomacy is declared, a different side means hostile.
+        _, story, _ = self._convert()
+        self.assertIn('a2x_create_station(70000, 0, 25000, "starbase_command", side="friendly"', story)
+        self.assertIn('side="friendly"', story.split("a2x_create_player")[1].split("\n")[0])
+
+    def test_unnamed_player_create_does_not_double_spawn(self):
+        # regression: the prescan skipped un-named creates before checking the type, so a
+        # 2.8 `<create type="player" player_slot="0" .../>` (usually unnamed) left
+        # player_var None -- the header then asked LM to build a ship from PLAYER_LIST
+        # *and* the body spawned one, giving two Artemis.
+        _, story, _ = self._convert()
+        self.assertIn("PLAYER_CREATE_DEFAULT = False", story)
+        self.assertNotIn("PLAYER_LIST", story)
+        self.assertEqual(story.count("a2x_create_player("), 1)
+
+    def test_sides_are_not_collapsed_onto_lm_keys(self):
+        # 2.8 sideValue is a faction index, not a 3-valued enum: MISS_The_Arena puts
+        # eight player ships on sideValues 4..11, each with its own station. Collapsing
+        # those onto tsn/raider/civ would make all eight teams allies.
+        xml = os.path.join(self.tmp.name, "MISS_Arena.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>PvP.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="1" name="A" sideValue="4"/>
+    <create type="player" player_slot="1" x="2" y="0" z="2" name="B" sideValue="5"/>
+    <create type="station" x="3" y="0" z="3" name="AS" sideValue="4"/>
+  </start>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertIn("a2x_declare_sides([4, 5])", story)
+        self.assertIn('side="side_4"', story)
+        self.assertIn('side="side_5"', story)
+        # the station pairs with its own team, not a shared "friendly"
+        self.assertIn('a2x_create_station(3, 0, 3, "starbase_command", side="side_4"', story)
+
+    def test_set_side_value_target_is_declared(self):
+        # a mid-mission defection must land on a side that has diplomacy, or the ship
+        # silently stops being anyone's enemy.
+        xml = os.path.join(self.tmp.name, "MISS_Defect.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Defect.</mission_description>
+  <start>
+    <create type="enemy" x="1" y="0" z="1" name="KR01" sideValue="1"/>
+  </start>
+  <event name="Turn">
+    <if_variable name="a1" comparator="EQUALS" value="1"/>
+    <set_side_value name="KR01" value="3"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertIn("a2x_set_side_value(obj_kr01, 3)", story)
+        self.assertIn("3", story.split("a2x_declare_sides(")[1].split(")")[0])
 
     def test_end_mission(self):
         _, story, _ = self._convert()
@@ -246,6 +328,7 @@ class ConvertAddAiTests(unittest.TestCase):
         em = Emitter.__new__(Emitter)
         em.notes, em.addons, em.symbols, em.player_var = [], set(), {}, None
         em.hullmap = None
+        em.side_values, em.player_side = set(), None
         line = em.c_neutral(XmlNode("create", {"type": "neutral", "x": "1", "y": "0",
                                                "z": "2", "name": '"Used" Scout'}))[0]
         self.assertIn(r'name="\"Used\" Scout"', line)

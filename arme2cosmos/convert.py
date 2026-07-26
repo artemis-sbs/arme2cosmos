@@ -10,7 +10,8 @@ from __future__ import annotations
 import os
 import re
 
-from .emit import Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _value
+from .emit import (Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _value,
+                   _side_key, _DEFAULT_PLAYER_SIDE)
 from .model import Mission
 from .parser import parse_file
 
@@ -48,10 +49,15 @@ def _player_default_lines(em: Emitter) -> list[str]:
     Set as plain globals so they win over the console's ``default shared ... = SETTINGS.get``."""
     if em.player_var is not None:
         return ["PLAYER_CREATE_DEFAULT = False"]
+    # No 2.8 player create -> let the server console build the defaults, but on the
+    # mission's OWN player side (2.8 sideValue 2), not a2x/LM's "tsn": friendly stations
+    # carry that sideValue, and the two must match once diplomacy is declared.
+    side = _side_key(_DEFAULT_PLAYER_SIDE)
+    em.side_values.add(_DEFAULT_PLAYER_SIDE)
     out = ["# 2.8 created no player ship (the player picks one in 2.8) -- build Cosmos defaults.",
            "PLAYER_CREATE_DEFAULT = True",
            "PLAYER_LIST = ["]
-    out += [f"    {s!r}," for s in _DEFAULT_PLAYER_LIST]
+    out += [f"    {dict(s, side=side)!r}," for s in _DEFAULT_PLAYER_LIST]
     out.append("]")
     return out
 
@@ -270,7 +276,50 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
             '        comms_receive(get_inventory_value(COMMS_SELECTED_ID, "a2x_hail", ""), '
             'title="Hail")',
         ]
+    # Every sideValue the mission touches is known only now, so splice the side
+    # declaration in ahead of the map (it must run before anything spawns).
+    lines[_map_label_index(lines):_map_label_index(lines)] = _create_sides_lines(em)
     return "\n".join(lines) + "\n"
+
+
+def _map_label_index(lines: list[str]) -> int:
+    """Index of the ``@map/...`` line -- where mission-level routes are spliced in."""
+    for i, l in enumerate(lines):
+        if l.startswith("@map/"):
+            return i
+    return len(lines)
+
+
+def _create_sides_lines(em: Emitter) -> list[str]:
+    """The ``//shared/signal/create_sides`` route that declares this mission's sides.
+
+    2.8 has no diplomacy table: sideValue IS the faction, and the engine implicitly makes
+    different non-zero values hostile. Cosmos resolves allegiance through registered side
+    agents instead, so a converted mission must declare it -- otherwise every
+    ``side_are_enemies`` test is False, and the LegendaryMissions NPC brains gate firing on
+    exactly that (``shoot = side_are_enemies(...)``), giving ships that chase but never fire.
+
+    ``create_sides`` is the right hook rather than the map's start block: the server console
+    fires it during start_server, BEFORE default player ships spawn and before any map runs.
+    (Same route OpenUniverse defines for its own sides -- LegendaryMissions' answer to it
+    lives in its maps/ folder, which is mission content, not one of the shipped mastlibs, so
+    a converted mission never inherits it.)
+    """
+    if not em.side_values:
+        return []
+    values = sorted(em.side_values)
+    keys = ", ".join(_side_key(v) for v in values)
+    return [
+        "# 2.8 sideValue -> Cosmos sides + diplomacy. 2.8 leaves this implicit (different",
+        "# sideValue = hostile); Cosmos needs it declared or nothing is anyone's enemy --",
+        f"# no NPC fires, and Science shows no allied/hostile split. Sides here: {keys}.",
+        "# Fired by the server console before player ships spawn. Synchronous on purpose:",
+        "# no await, and NO ->END (the route runs inline in the server-start task, so",
+        "# ending the task would end the caller).",
+        "//shared/signal/create_sides",
+        f"    a2x_declare_sides({values!r})",
+        "",
+    ]
 
 
 def _prescan_references(mission: Mission, em: Emitter) -> None:
@@ -308,21 +357,34 @@ _CAPTURED_CREATES = {"create:station", "create:enemy", "create:neutral",
                      "create:Anomaly", "create:blackHole"}
 
 
+def _side_value_of(n, em: Emitter) -> int:
+    """A create node's 2.8 sideValue as an int, defaulting to the player side (2)."""
+    raw = (n.get("sideValue") or "").strip()
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        return _DEFAULT_PLAYER_SIDE
+
+
 def _prescan_named_objects(mission: Mission, em: Emitter) -> None:
     """Register every named created object up front so later commands resolve them
     regardless of emission order (forward references, button-handler events)."""
     for n in mission.all_nodes():
         if n.tag != "create":
             continue
-        name = n.get("name")
-        if not name:
-            continue
         kind = n.kind_key()
         if kind == "create:player":
+            # Note the player BEFORE the name check: a 2.8 player create is usually
+            # unnamed (`<create type="player" player_slot="0" .../>`), and skipping those
+            # left player_var None -- so the header asked LegendaryMissions to build a
+            # default ship from PLAYER_LIST *and* the body spawned one, giving two ships.
             em.player_var = "player_ship"
-            em.symbols.setdefault(name, "player_ship")
-        elif kind in _CAPTURED_CREATES:
-            em._var_for(name)
+            em.player_side = _side_value_of(n, em)
+            if n.get("name"):
+                em.symbols.setdefault(n.get("name"), "player_ship")
+            continue
+        if n.get("name") and kind in _CAPTURED_CREATES:
+            em._var_for(n.get("name"))
     # 2.8 named carried craft (set_player_carried_type) are real spawned hangar objects --
     # capture their names too, so later references (set_relative_position / if_distance /
     # add_ai targetName) resolve to the spawned craft.

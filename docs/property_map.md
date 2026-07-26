@@ -128,7 +128,7 @@ overpower/coolant).
 
 | 2.8 property | Target | Cosmos | Status | Notes |
 |---|---|---|---|---|
-| `sideValue` (272) + `SideValue` (12) | role | `a2x_set_side_value` (1=enemy / 2=friendly) | **DONE** | property reuses the `set_side_value` side-role reassignment |
+| `sideValue` (272) + `SideValue` (12) | side | `a2x_set_side_value` (via `a2x.sides.side_key`) | **DONE** | property reuses the `set_side_value` side reassignment; the target sideValue is registered for `a2x_declare_sides` so it is a declared side with real diplomacy |
 | `pirateRepWithStations` (72) | — | no key | HUMAN | |
 | `canBuild` (4) | inventory | `a2x_can_build` | **DONE** | toggle a station's build ability -> `a2x_can_build` inventory; the LM docking build console hides "Build Weapons" when it is 0 |
 

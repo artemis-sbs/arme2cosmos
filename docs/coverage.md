@@ -45,7 +45,8 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `addto_object_property` / `copy_object_property` | **PARTIAL** | same, for mapped props |
 | `set_ship_text` | **DONE** | name/race/class/desc -> `name_tag`/`hull_origin`/`hull_name`/`long_description`. **`scan_desc` recovered** (all targets): emitted as a declarative `amd_science` scan in `scans.amd`, the object tagged with a `scan_<name>` role, loaded via `science_define_scan_amd` + the `science_scans` addon. **`hailtext` recovered** (all targets): stored on the ship as an `a2x_hail` inventory value where `set_ship_text` runs, plus one gated `//comms` **Hail** button that shows it (`comms_receive`). Per-ship (not the LM race-taunt pool) |
 | `set_relative_position` | **DONE** | `a2x_set_relative_position` (XZ; heading-relative nuance is a refinement) |
-| `set_side_value` | **DONE** | `a2x_set_side_value` (swaps the side role) |
+| `set_side_value` | **DONE** | `a2x_set_side_value` (moves the ship to another declared side; diplomacy follows the side). The destination sideValue is added to the mission's `a2x_declare_sides` set, so a defection can't land on an undeclared side |
+| `sideValue` (on `create`) | **DONE** | one Cosmos side per distinct 2.8 sideValue (`a2x_declare_sides`, emitted into `//shared/signal/create_sides`) -- see *Sides and diplomacy* below |
 | `set_special` (ability) | **DONE** | all 14 abilities -> LM elite system (engine flags + scripted `elite/*` roles via `handle_elite_abilities`); no-name calls target `COMMS_SELECTED_ID` |
 | `set_special` (ship/captain) | **DONE** | captain personality (cowardly/brave/bombastic/seething/duplicitous/exceptional) -> `a2x_set_captain` (LM surrender/taunt/fleets driver); ship power tier -> `a2x_set_ship_power` (shield/beam/tube coeffs) |
 | `set_comms_button` (+ `if_comms_button`) | **DONE** | a `//comms` route with `+ "label":` buttons |
@@ -81,6 +82,67 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `if_object_property` | **PARTIAL** | mapped props (`_AUTO_PROPS`) -> live `a2x_object_property(obj, prop) <op> val` boolean (loops + one-shot poll); unmapped props stay a `# when (verify by hand)` comment. Corpus: ~48% of occurrences now evaluate for real |
 | `if_scan_level` / `if_in_nebula` / `if_damcon_members` / `if_player_is_targeting` | TODO | emitted as a `# when (verify by hand)` comment |
 | `if_gm_key` / `if_client_key` | TODO | key handlers |
+
+---
+
+## Sides and diplomacy
+
+2.8 has **no diplomacy table**. A ship's `sideValue` *is* its faction, and the engine
+applies one implicit rule: different non-zero values are hostile, the same value is
+friendly, `0` means "no side". Nothing in a 2.8 mission ever declares it.
+
+Cosmos resolves allegiance the other way round -- through registered **side agents**
+linked by `side_ally` / `side_hostile`. A converted mission must therefore declare what
+2.8 left implicit, and the failure mode when it doesn't is silent rather than loud: the
+LM NPC brains gate the trigger on diplomacy,
+
+```
+shoot = side_are_enemies(BRAIN_AGENT_ID, _target) or force_shoot
+```
+
+so undeclared sides give you ships that chase and never fire, a Science console with no
+allied/hostile split, and grey sensor contacts. (LM declares its own sides in
+`maps/sides.amd`; `maps` is mission content, **not** one of the shipped mastlibs, so a
+converted mission never inherits it.)
+
+**What the tool emits.** One Cosmos side per *distinct sideValue the mission touches*
+(creates plus any runtime `set_side_value` destination), declared in a
+`//shared/signal/create_sides` route -- the hook the server console fires during
+start_server, before default player ships spawn and before any map runs:
+
+```
+//shared/signal/create_sides
+    a2x_declare_sides([1, 2])
+```
+
+Sides are **not** collapsed onto the three LM keys (`tsn`/`raider`/`civ`). `sideValue` is
+a faction index, not a 3-valued enum: MISS_The_Arena puts eight player ships on
+sideValues 4..11, each with its own station, and collapsing those would make all eight
+teams allies. Keys are `neutral`/`enemy`/`friendly` for 0/1/2 and `side_N` above that
+(mirrored between `emit._side_key` and `a2x.sides.side_key` -- keep them in step).
+
+**Side key vs combat role.** These are different jobs and the emitted spawn string
+carries both -- `spawn_common` splits on commas, the first token becomes the side key,
+every token becomes a role:
+
+```
+a2x_create_enemy(..., side="enemy, raider, fleet_1")
+                       ^key   ^scope  ^fleet role
+```
+
+* the **key** carries identity and diplomacy -- it is what makes a ship an enemy.
+* `raider` is only a **combat scope** tag. LM intersects it with diplomacy rather than
+  trusting it alone, e.g. the docking addon's enemies-near gate
+  `side_hostile_members(DOCKING_PLAYER_ID, "raider")`; without the tag that set is always
+  empty and the gate silently never fires. Tagging without declaring sides achieves
+  nothing. `tsn`/`civ` are not emitted -- nothing in the baseline mastlibs needs them.
+
+**The player's side comes from its own `sideValue`**, never a2x_create_player's `tsn`
+default (and `PLAYER_LIST` is written with the same key when the mission creates no
+player). Friendly stations carry that sideValue too; a player on a different side from
+its own station reads as hostile once diplomacy is declared.
+
+Runtime behaviour is pinned by `test_convert_sides` in the A2xTestRange suite.
 
 ---
 

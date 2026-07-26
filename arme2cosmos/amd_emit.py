@@ -980,4 +980,8 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
         L.append("    ->END")
         L.append("")
 
+    # Same side declaration the MAST target emits -- spliced in ahead of the map now that
+    # every sideValue the mission touches is known. See convert._create_sides_lines.
+    from .convert import _create_sides_lines, _map_label_index
+    L[_map_label_index(L):_map_label_index(L)] = _create_sides_lines(em)
     return "\n".join(L) + "\n"

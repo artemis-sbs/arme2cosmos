@@ -14,8 +14,35 @@ import re
 from .coverage import classify, FULL, PARTIAL
 from .model import Event, Mission, XmlNode
 
-# 2.8 sideValue -> a Cosmos side/role token (1=enemy, 2=friendly/player, 0=none).
+# 2.8 sideValue -> the Cosmos side KEY (mirror of a2x.sides.side_key -- keep in step).
+# One key per sideValue, never collapsed onto the three LegendaryMissions keys: 2.8's
+# sideValue is a faction index, not a 3-valued enum, and its implicit rule is "different
+# non-zero value => hostile". MISS_The_Arena puts eight player ships on sideValues 4..11
+# (each with its own station); collapsing those would make all eight teams allies.
+# a2x_declare_sides (emitted into //shared/signal/create_sides) declares the relations.
 _SIDE = {"0": "neutral", "1": "enemy", "2": "friendly"}
+
+# Combat-scope role for hostiles. NOT what makes a ship an enemy -- diplomacy does that.
+# LegendaryMissions intersects this role with diplomacy for "is there an enemy" tests,
+# e.g. the docking addon's enemies-near gate:
+#     side_hostile_members(DOCKING_PLAYER_ID, "raider")
+# so without the tag that set is always empty and the gate silently never fires.
+_RAIDER_ROLE = "raider"
+
+# The 2.8 sideValue the player is on when a mission never creates a player ship (2.8's
+# convention: sideValue 2 is the player/TSN side, which its friendly stations share).
+_DEFAULT_PLAYER_SIDE = 2
+
+
+def _side_key(value) -> str:
+    """2.8 sideValue -> Cosmos side key. Mirror of ``a2x.sides.side_key``."""
+    s = str(value).strip()
+    if s in _SIDE:
+        return _SIDE[s]
+    try:
+        return f"side_{int(float(s))}"
+    except (TypeError, ValueError):
+        return "enemy"
 
 # 2.8 add_ai block types that a2x_add_ai maps to a real brain (mirror of a2x.ai).
 # Others emit the call but a2x_add_ai is a no-op for them -> flagged in notes.
@@ -137,6 +164,14 @@ class Emitter:
         self.addons: set[str] = set()  # feature-detected story.json mastlibs
         self.symbols: dict[str, str] = {}  # 2.8 object name -> MAST variable
         self.player_var: str | None = None  # MAST var holding the player ship
+        # every 2.8 sideValue the mission touches (creates + runtime set_side_value), so
+        # the emitted a2x_declare_sides covers each one; 2.8 declares no sides at all, and
+        # an undeclared side means side_are_enemies is False and NPC brains never fire.
+        self.side_values: set[int] = set()
+        # the sideValue the player ships are on (from create type="player"); friendly
+        # objects share it, so it must not be hardcoded -- a player on a different side
+        # from its own station reads as hostile once diplomacy is declared.
+        self.player_side: int | None = None
         # flags consumed by a //signal-converted event: set_variable on these also
         # emits the signal that drives the route (set by build_story_mast).
         self.signal_flags: set[str] = set()
@@ -195,8 +230,35 @@ class Emitter:
     def _xyz(self, n: XmlNode, px="x", py="y", pz="z"):
         return (n.get(px, "0"), n.get(py, "0"), n.get(pz, "0"))
 
-    def _side(self, n: XmlNode) -> str:
-        return _SIDE.get((n.get("sideValue") or "").strip(), "enemy")
+    def _note_side(self, value) -> str:
+        """Record a 2.8 sideValue as one this mission uses, and return its Cosmos key.
+        Every value that reaches here ends up in the emitted a2x_declare_sides call."""
+        try:
+            self.side_values.add(int(float(str(value).strip())))
+        except (TypeError, ValueError):
+            pass  # a non-literal (variable) sideValue -- can't declare it statically
+        return _side_key(value)
+
+    def _side(self, n: XmlNode, default: int = 1) -> str:
+        """The Cosmos side key for a create node, recording the sideValue for declaration.
+
+        ``default`` is the 2.8 sideValue to assume when the node omits one -- per create
+        type, matching the a2x create_* defaults (station 2/friendly, enemy 1, neutral 0).
+        It is recorded like an explicit value: once diplomacy is declared the fallback is
+        a real allegiance, not just an inert role name as it was before."""
+        raw = (n.get("sideValue") or "").strip()
+        return self._note_side(raw if raw else default)
+
+    def _is_player_side(self, n: XmlNode) -> bool:
+        """Whether this node's sideValue is the player's (so it must NOT be raider-tagged)."""
+        raw = (n.get("sideValue") or "").strip()
+        if not raw:
+            return False
+        ps = self.player_side if self.player_side is not None else _DEFAULT_PLAYER_SIDE
+        try:
+            return int(float(raw)) == ps
+        except (TypeError, ValueError):
+            return False
 
     def _name_kw(self, n: XmlNode) -> str:
         nm = n.get("name")
@@ -220,14 +282,19 @@ class Emitter:
             self.note(f"verify station art for {n.get('name','?')} "
                       f"(hullID={n.get('hullID')} race={n.get('raceKeys')})")
         return [self._assign(n, f'a2x_create_station({x}, {y}, {z}, "{art}", '
-                f'side="{self._side(n)}"{self._name_kw(n)})')]
+                f'side="{self._side(n, _DEFAULT_PLAYER_SIDE)}"{self._name_kw(n)})')]
 
     def c_enemy(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
-        side = "enemy"
+        # The first token is the side KEY (identity + diplomacy); the rest become plain
+        # roles -- spawn_common splits on commas and adds every entry as a role.
+        parts = [self._side(n)]
+        if not self._is_player_side(n):
+            parts.append(_RAIDER_ROLE)  # combat scope for LM's hostile-set queries
         fleet = n.get("fleetnumber")
         if fleet:
-            side = f"enemy, fleet_{fleet}"  # role so if_fleet_count can await it
+            parts.append(f"fleet_{fleet}")  # role so if_fleet_count can await it
+        side = ", ".join(parts)
         art = self._art(n, _ENEMY_ART)
         if art == _ENEMY_ART:
             self.note(f"verify enemy art for {n.get('name','?')} "
@@ -239,7 +306,7 @@ class Emitter:
         x, y, z = self._xyz(n)
         art = self._art(n, _NEUTRAL_ART)
         return [self._assign(n, f'a2x_create_neutral({x}, {y}, {z}, "{art}", '
-                f'side="{self._side(n)}"{self._name_kw(n)})')]
+                f'side="{self._side(n, 0)}"{self._name_kw(n)})')]
 
     def c_player(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
@@ -251,7 +318,12 @@ class Emitter:
         if n.get("name"):
             self._var_for(n.get("name"))  # also resolvable by name
             self.symbols[n.get("name")] = "player_ship"
-        return [f'    shared player_ship = a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", name="{nm}")']
+        # The player's side comes from its own sideValue, never a2x_create_player's "tsn"
+        # default: friendly stations carry the same 2.8 sideValue, and once diplomacy is
+        # declared a player on a different side from its own station reads as hostile.
+        side = self._side(n, _DEFAULT_PLAYER_SIDE)
+        return [f'    shared player_ship = a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", '
+                f'name="{nm}", side="{side}")']
 
     def c_generic(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
@@ -440,6 +512,9 @@ class Emitter:
             obj = self._gm_selected(n)
         if obj is None:
             return [f"    # TODO set_side_value: {_xml_repr(n)}"]
+        # a mid-mission defection: declare the destination side too, or the ship lands on
+        # a side with no diplomacy and silently stops being anyone's enemy.
+        self._note_side(n.get("value", "0"))
         return [f'    a2x_set_side_value({obj}, {_value(n.get("value", "0"))})']
 
     def c_direct(self, n: XmlNode) -> list[str]:
@@ -474,8 +549,9 @@ class Emitter:
         # nameless sensorSetting -> global: set every player ship's scan range
         if n.get("name") is None and prop == "sensorSetting":
             return [f'    a2x_set_sensor_setting_all({_value(val)})']
-        # sideValue as a property reuses the side-role reassignment (1=enemy / 2=friendly)
+        # sideValue as a property reuses the side reassignment (same declare-the-target rule)
         if var is not None and prop in ("sideValue", "SideValue"):
+            self._note_side(val)
             return [f"    a2x_set_side_value({var}, {_value(val)})"]
         # elite/special ability bit-sum -> enable each named elite ability (LM fleets addon)
         if var is not None and prop in ("eliteAbilityBits", "specialAbilityBits"):
