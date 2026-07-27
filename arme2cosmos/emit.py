@@ -582,9 +582,17 @@ class Emitter:
         return [f"    a2x_clear_ai({var})"]
 
     def c_destroy(self, n: XmlNode) -> list[str]:
-        var = self.symbols.get(n.get("name")) or self._gm_selected(n)
+        var = self.symbols.get(n.get("name"))
         if var is not None:
             return [f"    a2x_destroy({var})"]
+        var = self._gm_selected(n)
+        if var is not None:
+            # "Delete selected" acts on whatever the GM has highlighted -- including, if
+            # they are careless, the gamemaster's own ship, which takes the console that
+            # issued the command with it. 2.8 had the same hazard; nothing is lost by
+            # refusing. The role is the one the //comms tree already gates on.
+            return [f'    if not has_roles({var}, "gamemaster"):',
+                    f"        a2x_destroy({var})"]
         name = n.get("name")
         if name:
             # no create the tool saw (dynamically created, or a dead reference in the 2.8

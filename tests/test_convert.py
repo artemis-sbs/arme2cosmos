@@ -407,6 +407,46 @@ class ConvertTests(unittest.TestCase):
                         story.index('a2x_big_message("MISSION SUCCESS"'))
         self.assertNotIn("# when: fleet None", story)
 
+    def test_gm_button_tree_splits_on_backslash_too(self):
+        # 2.8 has no single separator convention for GM submenus: most missions write
+        # "Create Enemy/Extras/Nebulae", some write "Delete\\Selected ship", and a mission
+        # can mix both. Splitting on "/" alone left the backslash ones as one flat button
+        # whose LABEL still contained the separator. Also: "delete selected" must refuse to
+        # delete the gamemaster's own ship, which would take the issuing console with it.
+        xml = os.path.join(self.tmp.name, "MISS_Gm.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>GM.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+    <set_gm_button text="Delete\\Selected ship [0]"/>
+    <set_gm_button text="Create Enemy/Small Standard [1]"/>
+  </start>
+  <event>
+    <if_gm_button text="Delete\\Selected ship [0]"/>
+    <destroy use_gm_selection="yes"/>
+  </event>
+  <event>
+    <if_gm_button text="Create Enemy/Small Standard [1]"/>
+    <create type="enemy" x="9" y="0" z="9" name="KR9" sideValue="1"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # both separators build a submenu: a "Delete" branch and a "Create Enemy" branch
+        self.assertIn('+ "Delete" //comms/gm/delete', story)
+        self.assertIn('+ "Create Enemy" //comms/gm/create_enemy', story)
+        self.assertIn("//comms/gm/delete ", story)
+        # the leaf keeps only its own segment -- no separator left in any label
+        self.assertIn('+ "Selected ship [0]":', story)
+        self.assertNotIn('+ "Delete\\\\Selected ship [0]":', story)
+        # and deleting the GM's selection spares the gamemaster
+        self.assertIn('if not has_roles(COMMS_SELECTED_ID, "gamemaster"):', story)
+        self.assertIn("        a2x_destroy(COMMS_SELECTED_ID)", story)
+
     def test_random_set_variable_actually_rolls(self):
         # 2.8 rolls a range in place (randomIntLow/High) instead of carrying a `value`.
         # Reading only `value` gave those a flat 0 -- not a near-miss: every event gated on

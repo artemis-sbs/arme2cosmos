@@ -1004,6 +1004,19 @@ def _button_body(em: Emitter, ev, handler_tag: str) -> list[str]:
     return body
 
 
+def _gm_path(text: str) -> list[str]:
+    """A 2.8 GM button label -> its submenu path.
+
+    2.8 has no single separator convention: most missions write ``Create Enemy/Extras/
+    Nebulae`` but some use a BACKSLASH (``Delete\\Selected ship``), and a mission can mix
+    both. Splitting on ``/`` alone left the backslash ones as one flat button whose label
+    still contained the separator -- MISS_Module_3_bases showed a literal
+    ``Delete\\Selected ship [0]`` instead of a Delete submenu. 14 labels across
+    MISS_ShipyardEscape and MISS_Module_3_bases.
+    """
+    return [s.strip() for s in re.split(r"[/\\]", text or "") if s.strip()]
+
+
 def build_gm_tree_routes(mission: Mission, em: Emitter, gm_events: dict) -> list[str]:
     """2.8 GM buttons -> a gamemaster-gated //comms tree. Slash-delimited button text
     (``AI/Enemy/bombastic captain``) becomes nested //comms/gm/... submenu routes;
@@ -1018,7 +1031,7 @@ def build_gm_tree_routes(mission: Mission, em: Emitter, gm_events: dict) -> list
     root = {"kids": {}}
     for text in texts:
         node = root
-        for seg in (s.strip() for s in text.split("/") if s.strip()):
+        for seg in _gm_path(text):
             node = node["kids"].setdefault(seg, {"kids": {}, "event": None})
         node["event"] = gm_events.get(text)
 
