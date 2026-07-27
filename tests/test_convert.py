@@ -573,6 +573,20 @@ class ConvertTests(unittest.TestCase):
         # whatever point the chain reached it
         self.assertNotIn("# You Died", story[:story.index("//shared/signal/player_ship_destroyed")])
 
+    def test_amd_target_asks_for_the_quest_tab_that_displays_its_tree(self):
+        # The AMD target's whole point is a live objectives log. `quests` is only the
+        # DRIVER (quest_driver runs the tree); the log the crew actually reads is the quest
+        # tab in the `documents` addon. Without it the tree is built and then invisible.
+        d = convert_file(self.xml, self.out, target="amd")
+        with open(os.path.join(d, "story.json"), encoding="utf-8") as f:
+            sjson = f.read()
+        for addon in ("quests", "documents"):
+            self.assertIn(f"LegendaryMissions.{addon}.", sjson, addon)
+        # the MAST target has no quest tree, so it must not drag the tab in
+        dm = convert_file(self.xml, self.out + "_m", target="mast")
+        with open(os.path.join(dm, "story.json"), encoding="utf-8") as f:
+            self.assertNotIn("LegendaryMissions.documents.", f.read())
+
     def test_player_respawn_event_routed_in_the_amd_target_too(self):
         d, story = self._convert_respawn("amd")
         self.assertIn("//shared/signal/player_ship_destroyed", story)

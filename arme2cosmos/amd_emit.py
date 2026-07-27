@@ -748,6 +748,11 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
 
     _prescan_named_objects(mission, em)
     em.addons.add("quests")  # LM quest_driver reads the granted AMD
+    # ...and the tab that DISPLAYS it. quest_driver only runs the tree; the quest log the
+    # crew reads is `documents/quest_tab.mast` (gui_tab_add_top("quest"), shown on the
+    # standard bridge consoles). Without it the whole point of the AMD target -- a live
+    # objectives log -- is built and then invisible in game.
+    em.addons.add("documents")
     em.emit_scan_roles = True  # tag scanned objects so amd_science scans render (scan_desc)
     # prescan scan_desc up front so the science_define_scan call is emitted even when the
     # set_ship_text lives in an event body (emitted after the grant line).
