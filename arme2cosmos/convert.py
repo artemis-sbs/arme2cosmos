@@ -644,27 +644,20 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
            "    # an empty console set is discarded silently -- the card just never appears.",
            "    # One frame is enough in practice; a second gives margin for a slower client.",
            "    await delay_sim(1)",
-           "    # Re-apply the contact colours here as well as in a2x_declare_sides. The",
-           "    # sides are declared from //shared/signal/create_sides, which the server",
-           "    # console fires during start_server, where sim may not be live yet -- and a",
-           "    # missing sim skips the colours SILENTLY, which looks exactly like broken",
-           "    # diplomacy: correctly hostile ships drawn in the neutral colour.",
+           "    # Re-apply the contact colours here as well as in a2x_declare_sides, as a",
+           "    # fallback for an older LegendaryMissions library -- see the re-assert task",
+           "    # at the bottom of this file for what this is guarding against.",
            "    a2x_set_diplomacy_colors()"]
     if em.side_values:
         # Re-declare the sides here as well as in //shared/signal/create_sides.
         # declare_sides is idempotent, and the point is its ENGINE-side calls:
-        # sim.set_side_relationship (2D map / diplomacy shading) and
-        # sim.set_side_icon_color. Those do not stick when issued during
-        # create_sides, which the server console fires inside start_server -- the
-        # link graph survives (so every scripting-level check passes) while the
-        # engine's own tables stay at their defaults and contacts render gray.
-        # Verified: the icon colour was gray until re-applied after start.
-        out += ["    # Re-assert sides AFTER start: the engine-side relationship/colour",
-                "    # tables do not retain what create_sides set during start_server,",
-                "    # even though the scripting-level link graph does. One re-assert at",
-                "    # ~1s proved too early in-engine (contacts stayed grey); the same",
-                "    # calls at ~3s took. Rather than bet on one delay, re-assert a few",
-                "    # times over the first seconds -- it is idempotent and cheap.",
+        # sim.set_side_relationship (2D map / diplomacy shading),
+        # sim.set_side_icon_color and sim.set_diplomacy_color. Those are lost when
+        # issued in the same frame as sim_create() -- which is what the server console
+        # used to do -- so a converted mission re-asserts them from a later frame.
+        out += ["    # Re-assert sides AFTER start, in case this mission is running against",
+                "    # a LegendaryMissions library whose server console still declares sides",
+                "    # in the same frame as sim_create(). See a2x_reassert_sides below.",
                 "    task_schedule(a2x_reassert_sides)"]
     if has_spares:
         # The mission spawned its own player ships at the 2.8 positions. Tag them so the
@@ -686,10 +679,22 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
     if em.side_values:
         vals = sorted(em.side_values)
         out += ["",
-                "# The engine's side relationship / icon-colour tables do not retain what",
-                "# create_sides wrote during start_server, and a single re-assert just after",
-                "# game_started is still too early. Re-apply over the first few seconds; both",
-                "# calls are idempotent, so the repeats cost nothing once they have taken.",
+                "# Compatibility net for older LegendaryMissions libraries.",
+                "#",
+                "# a2x_declare_sides runs from //shared/signal/create_sides, which the server",
+                "# console fires inside start_server. sim.set_side_relationship /",
+                "# set_side_icon_color / set_diplomacy_color all go through",
+                "# FrameContext.context.sim -- the simulation handle the engine passed in at",
+                "# the top of the CURRENT event. sim_create() replaces the simulation but",
+                "# cannot refresh that handle (sbs exposes no module-level sim), so a console",
+                "# that calls sim_create() and signal_emit(create_sides) in one frame sends",
+                "# every one of those writes to a dead simulation -- silently. The link graph",
+                "# survives, so every scripting-level check still passes while the engine's",
+                "# own tables stay at their defaults and contacts render grey.",
+                "#",
+                "# server_console yields a frame between the two now, so this loop should be a",
+                "# no-op. It is kept because a mission ships independently of the library it",
+                "# runs against, and re-declaring is idempotent and cheap.",
                 "=== a2x_reassert_sides",
                 "    _n = 0",
                 "---a2x_reassert_loop",
