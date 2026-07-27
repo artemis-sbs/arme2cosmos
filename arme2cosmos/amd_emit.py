@@ -57,11 +57,11 @@ class Quest:
         self.title = title
         self.scope = "shared"
         self.state = "active"
-        self.goal: str | None = None      # `Goal: destroy 1 bad_alien`
-        self.when: str | None = None       # `When: signal a2x_gate_0`
+        self.goal: str | None = None      # `Done when: destroy 1 bad_alien`
+        self.when: str | None = None       # `Starts when: signal a2x_gate_0`
         self.complete_after: str | None = None  # `Complete after: 60 seconds` (timed beat)
         self.reveal: str | None = None     # `Then: reveal <key>` (reveal chain)
-        self.gate_label: str | None = None  # its escape-hatch watcher label (if When: signal)
+        self.gate_label: str | None = None  # its escape-hatch watcher label (if Starts when: signal)
         self.phase_gates: list = []         # [(flag, vkey, vraw)] surviving phase-gate flags
         self.parent: str | None = None      # `Parent: <key>` (mission-tree aggregation)
         self.required = False               # `Required: true` (parent needs this child)
@@ -79,9 +79,9 @@ class Quest:
         out = [f"# [{_amd_text(self.title)}]({self.key})", "---",
                f"Scope: {self.scope}", f"State: {self.state}"]
         if self.goal:
-            out.append(f"Goal: {self.goal}")
+            out.append(f"Done when: {self.goal}")
         if self.when:
-            out.append(f"When: {self.when}")
+            out.append(f"Starts when: {self.when}")
         if self.complete_after:
             out.append(f"Complete after: {self.complete_after}")
         if self.reveal:
