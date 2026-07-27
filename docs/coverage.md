@@ -250,11 +250,35 @@ turns polling into event-driven routes. Selectable with `--event-model`:
   - Multi-condition events stay polling loops **on purpose**: a pure route would miss the
     "gate flag opens after the object died / undocked" case that a per-tick loop catches.
 - **Flags** are `shared` + forward-declared (`default shared F = 0`) so concurrent tasks/routes read them.
-- **A failed guard in a chained scene skips that scene**, not the mission: an
-  `if_exists`/`if_not_exists` emits `jump event_<i+1> if ...`, and only the final scene
-  (which has no next) ends the task. These are one-shot tests, not waits -- 2.8 checks them
-  when the event is considered and moves on. Emitting `->END` here instead silently threw
-  away every remaining scene, which hit 862 chained scenes across 22 corpus missions.
+- **Every chained scene gets a real gate.** A condition the chain could not express used to
+  become a bare comment, and a scene whose conditions were *all* comments had no gate left:
+  it ran the instant the chain reached it. That is how MISS_TrialsOfDeneb01 announced
+  MISSION SUCCESS at t=0 and ended ten seconds later. 298 chained scenes were in that state;
+  it is now 0. Three shapes, and picking the wrong one is worse than the comment was:
+
+  | shape | for | emitted |
+  |---|---|---|
+  | **wait** | the condition BECOMES true | `await ...`, or a half-second poll loop (`---wait_<kind>_N`) |
+  | **skip** | already settled on arrival | `jump event_<i+1> if not (...)` (`->END` on the last scene) |
+  | comment | nothing maps yet | `# guard: ...` -- the dangerous one, so it is now rare |
+
+  Waits: `if_distance`, the sphere and box pairs, `if_timer_finished`, `if_docked`,
+  `if_fleet_count`, `if_object_property`. Skips: `if_exists`/`if_not_exists`,
+  `if_difficulty`. A failed skip jumps to the NEXT scene -- emitting `->END` there instead
+  ended the whole map task, silently discarding every remaining scene (862 scenes across 22
+  missions).
+
+- **`if_variable` is decided per scene** by `convert.plan_chain_flag_gates`, which needs the
+  chain order and the `set_variable` graph, so the emitter cannot do it alone:
+  - a **latch** (`!= v`, `== 0`, or a flag the scene's own body sets) is 2.8 run-once
+    bookkeeping -- failing it means this scene has had its turn, so **skip**.
+  - a **phase gate** (`== v` produced elsewhere) means "wait until the story gets here" --
+    **wait**, but only when something that runs *before* this scene can set it: the start
+    block, an off-chain event (polling loop or route), or an earlier scene.
+  - a gate whose only producer is a **later** scene would wait on its own future. 2.8 does
+    not care (its events all run continuously, so order is free) but a linear chain would
+    deadlock, and a deadlocked mission is worse than a mistimed one -- so those skip, and
+    MIGRATION_NOTES reports the count.
 
 ---
 

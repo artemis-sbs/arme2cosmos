@@ -219,6 +219,10 @@ class Emitter:
         self.hails: dict[str, str] = {}
         self.hail_done: set[str] = set()  # objects already given their stored hail value
         self.wait_prop_n = 0  # unique-label counter for chained-scene poll waits
+        # What a chained scene's if_variable becomes: id(condition node) -> "skip" | "wait".
+        # Decided by convert.plan_chain_flag_gates, which can see the chain ORDER and who
+        # sets each flag; an absent entry means it stays a comment.
+        self.chain_flag_gate: dict[int, str] = {}
         # 2.8 object names referenced by a later command/condition (not the create) -- a
         # monster with a referenced name needs the capturable path, not a prefab_spawn.
         self.referenced_names: set[str] = set()
@@ -1224,6 +1228,14 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0,
         return [f'    # guard: tag match ~ "{s}"  '
                 f'(get_inventory_value({var}, "tag_source_name") == "{s}")']
     if tag == "if_variable":
+        # A latch skips, a phase gate waits -- and which is which needs the chain order and
+        # the set_variable graph, so convert.plan_chain_flag_gates decides it and leaves the
+        # verdict here. No verdict (no chain, or a value we cannot reason about) -> comment.
+        gate = em.chain_flag_gate.get(id(n))
+        if gate == "skip":
+            return _skip_unless(var_cond_bool(n), next_label)
+        if gate == "wait":
+            return _wait_until(em, var_cond_bool(n), "flag")
         return [f'    # guard: {_pyname(n.get("name"))} {n.get("comparator","")} {n.get("value","")}']
     if tag == "if_timer_finished":
         return [f'    await is_timer_finished(0, "{n.get("name")}")']

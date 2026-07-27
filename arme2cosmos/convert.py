@@ -12,7 +12,7 @@ import re
 
 from .emit import (Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _value,
                    _side_key, _DEFAULT_PLAYER_SIDE, _AI_OVERRIDES_DEFAULT,
-                   player_slot_name)
+                   player_slot_name, _num_key)
 from .model import Mission
 from .parser import parse_file
 
@@ -212,6 +212,76 @@ def _player_route_lines(mission: Mission, em: Emitter) -> list[str]:
     out.append("    ->END")
     out.append("")
     return out
+
+
+def plan_chain_flag_gates(seq_events: list, mission: Mission, em: Emitter) -> None:
+    """Decide what each chained scene's ``if_variable`` becomes: a skip, a wait, or nothing.
+
+    A flag test in a chained scene used to emit only a comment, leaving scenes with no gate
+    at all -- how MISS_TrialsOfDeneb01 announced MISSION SUCCESS at t=0. But the two things
+    a 2.8 flag test means need opposite translations, and getting it backwards is worse than
+    the comment, so the decision is made HERE, where the chain order is known, rather than
+    in the emitter, which sees one condition at a time.
+
+    * a **latch** (``!= v``, ``== 0``, or a flag this scene's own body sets) is 2.8's
+      run-once bookkeeping: "not done yet". Failing it means this scene has already had its
+      turn -> SKIP.
+    * a **phase gate** (``== v`` produced elsewhere) is "wait until the story reaches here"
+      -> WAIT, but only when something that runs BEFORE this scene can set it: the start
+      block, an event that is not in the chain (a polling loop or a route), or an earlier
+      chained scene.
+    * a gate whose only producer is a LATER chained scene would wait on its own future.
+      2.8 does not care -- its events all run continuously, so order is free -- but a linear
+      chain would deadlock, and a deadlocked mission is worse than a mistimed one. Those
+      SKIP as well, and are counted into MIGRATION_NOTES as the ordering the chain could not
+      express.
+    * a flag never set to that value anywhere fires in neither engine -> SKIP.
+    """
+    chain_pos = {id(ev): i for i, ev in enumerate(seq_events)}
+    # (flag, numeric value) -> the chain positions that produce it, and whether anything
+    # OUTSIDE the chain does (start block, polling loop, route -- all live from t=0).
+    setters: dict[tuple, set] = {}
+    off_chain: set = set()
+    for n in mission.start:
+        if n.tag == "set_variable" and n.get("name"):
+            off_chain.add((_pyname(n.get("name")), _num_key(n.get("value"))))
+    for ev in mission.events:
+        pos = chain_pos.get(id(ev))
+        for n in ev.commands:
+            if n.tag != "set_variable" or not n.get("name"):
+                continue
+            key = (_pyname(n.get("name")), _num_key(n.get("value")))
+            if pos is None:
+                off_chain.add(key)
+            else:
+                setters.setdefault(key, set()).add(pos)
+    late = 0
+    for i, ev in enumerate(seq_events):
+        own = {_pyname(n.get("name")) for n in ev.commands
+               if n.tag == "set_variable" and n.get("name")}
+        for c in ev.conditions:
+            if c.tag != "if_variable" or not c.get("name"):
+                continue
+            name, vkey = _pyname(c.get("name")), _num_key(c.get("value"))
+            cmp_ = (c.get("comparator", "") or "").strip().upper()
+            is_zero = (c.get("value", "") or "").strip() in ("0", "0.0")
+            if cmp_ in ("NOT", "!=") or (cmp_ in ("EQUALS", "=") and is_zero) or name in own:
+                em.chain_flag_gate[id(c)] = "skip"
+                continue
+            if vkey is None:
+                continue   # an expression, not a value we can reason about -> comment
+            before = {p for p in setters.get((name, vkey), set()) if p < i}
+            if (name, vkey) in off_chain or before:
+                em.chain_flag_gate[id(c)] = "wait"
+            else:
+                em.chain_flag_gate[id(c)] = "skip"
+                if setters.get((name, vkey)):
+                    late += 1
+    if late:
+        em.note(f"chain order: {late} chained scene(s) gate on a flag that only a LATER "
+                f"scene sets. 2.8 events run continuously so order was free; a linear chain "
+                f"cannot wait on its own future without deadlocking, so those scenes are "
+                f"skipped. Re-order them, or regenerate with --event-model a28_compatible.")
 
 
 def is_player_respawn_event(ev, em: Emitter) -> bool:
@@ -436,6 +506,9 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
             lines.append(f"    task_schedule(respawn_{j})")  # initial spawn (then routed)
         lines.append("")
 
+    # Decide the flag gates before emitting any scene: the verdict for one scene depends on
+    # where every OTHER scene sits in the chain, which a per-condition emitter cannot see.
+    plan_chain_flag_gates(seq_events, mission, em)
     for i, ev in enumerate(seq_events):
         lines.append(f"--- event_{i}" + (f"   # {ev.name}" if ev.name != f"event_{i}" else ""))
         # A guard that fails skips to the NEXT scene. The last one has no next, so there it

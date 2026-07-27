@@ -407,6 +407,71 @@ class ConvertTests(unittest.TestCase):
                         story.index('a2x_big_message("MISSION SUCCESS"'))
         self.assertNotIn("# when: fleet None", story)
 
+    def test_chained_flag_latch_skips_and_phase_gate_waits(self):
+        # The two things a 2.8 flag test means need OPPOSITE translations in a chain, and
+        # getting it backwards is worse than the comment it replaces:
+        #   "phase != 1"  -> run-once bookkeeping. Already done? skip this scene.
+        #   "phase == 1"  -> wait until the story gets here.
+        xml = os.path.join(self.tmp.name, "MISS_Flags.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Flags.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+  </start>
+  <event name="Opening">
+    <if_variable name="phase" comparator="NOT" value="1.0"/>
+    <log text="opening"/>
+    <set_variable name="phase" value="1.0"/>
+  </event>
+  <event name="After opening">
+    <if_variable name="phase" comparator="EQUALS" value="1.0"/>
+    <log text="second"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast", event_model="linear")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # latch -> skip forward, never a wait (its own body sets the flag too)
+        self.assertRegex(story, r"jump event_\d+ if not \(phase != 1\.0\)")
+        # phase gate produced by the EARLIER scene -> a wait, which can actually resolve
+        self.assertRegex(story, r"---wait_flag_\d+\n    await delay_sim\(0\.5\)\n"
+                                r"    jump wait_flag_\d+ if not \(phase == 1\.0\)")
+        self.assertNotIn("# guard: phase", story)
+
+    def test_flag_gate_set_only_by_a_later_scene_does_not_deadlock(self):
+        # 2.8 events run continuously, so a gate set by a "later" event is fine there. A
+        # linear chain waiting on its own future would hang, and a deadlocked mission is
+        # worse than a mistimed one -- so it skips, and MIGRATION_NOTES says so.
+        xml = os.path.join(self.tmp.name, "MISS_Backwards.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Backwards.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+  </start>
+  <event name="Needs the flag">
+    <if_variable name="late" comparator="EQUALS" value="1.0"/>
+    <log text="needs it"/>
+  </event>
+  <event name="Sets the flag">
+    <if_timer_finished name="t"/>
+    <set_variable name="late" value="1.0"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast", event_model="linear")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        with open(os.path.join(d, "MIGRATION_NOTES.md"), encoding="utf-8") as f:
+            notes = f.read()
+        self.assertRegex(story, r"jump event_\d+ if not \(late == 1\.0\)")
+        self.assertNotIn("wait_flag", story)      # a wait here would never resolve
+        self.assertIn("only a LATER scene sets", notes)
+
     def test_chained_scenes_gate_on_box_difficulty_and_fleet_counts(self):
         # A chained scene whose conditions all degrade to comments has NO gate and runs the
         # instant the chain reaches it. _cond_bool could already express these three; only
