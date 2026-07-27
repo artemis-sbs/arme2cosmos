@@ -1095,8 +1095,15 @@ def _resolve_obj(em: Emitter, name: str | None, slot: str | None) -> str:
     return em.symbols.get(name) or f'a2x_named("{_mast_str(name)}")'
 
 
-def emit_condition(em: Emitter, n: XmlNode, idx: int = 0) -> list[str]:
-    """Translate an event condition into a wait/guard line (best-effort)."""
+def emit_condition(em: Emitter, n: XmlNode, idx: int = 0,
+                   next_label: str | None = None) -> list[str]:
+    """Translate an event condition into a wait/guard line (best-effort).
+
+    ``next_label`` is the scene AFTER this one in the chain, and is what a failed guard
+    skips to. Without it a guard has nowhere to go but ``->END``, which ends the whole map
+    task -- so one unmet condition threw away every remaining scene. Pass None only for the
+    last scene in the chain, where ending really is what comes next.
+    """
     tag = n.tag
     if tag == "if_fleet_count":
         fl = n.get("fleetnumber")
@@ -1133,9 +1140,12 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0) -> list[str]:
         return [f'    # guard: a2x_in_box({o}, {n.get("leastX","0")}, {n.get("leastZ","0")}, '
                 f'{n.get("mostX","0")}, {n.get("mostZ","0")}, inside={inside})']
     if tag in ("if_exists", "if_not_exists"):
+        # A one-shot test, not something to wait on: 2.8 checks it the moment the event is
+        # considered. Failing it SKIPS this scene -- it does not end the mission.
         o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
         neg = "not " if tag == "if_exists" else ""
-        return [f"    ->END if {neg}object_exists({o})"]
+        skip = f"jump {next_label}" if next_label else "->END"
+        return [f"    {skip} if {neg}object_exists({o})"]
     if tag in ("if_monster_tag_matches", "if_object_tag_matches"):
         name = n.get("name") or n.get("objectName")
         var = em.symbols.get(name) or f'"{name}"'

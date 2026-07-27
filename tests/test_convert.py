@@ -377,6 +377,38 @@ class ConvertTests(unittest.TestCase):
         with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
             return d, f.read()
 
+    def test_chained_exists_guard_skips_the_scene_not_the_mission(self):
+        # An if_exists/if_not_exists in a CHAINED scene used to emit `->END if ...`, which
+        # ends the whole map task -- so one unmet condition silently threw away every
+        # remaining scene (862 scenes across 22 corpus missions). 2.8 just skips the event.
+        xml = os.path.join(self.tmp.name, "MISS_Guard.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Guard.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+    <create type="station" x="3" y="0" z="4" name="DS1" sideValue="2"/>
+  </start>
+  <event name="First">
+    <if_exists name="DS1"/>
+    <log text="one"/>
+  </event>
+  <event name="Second">
+    <if_not_exists name="DS1"/>
+    <log text="two"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast", event_model="linear")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # the non-final scene hands off to the next one...
+        self.assertIn("jump event_1 if not object_exists(obj_ds1)", story)
+        # ...and only the LAST scene ends the task, where the chain ends anyway
+        self.assertIn("->END if object_exists(obj_ds1)", story)
+        self.assertNotIn("->END if not object_exists(obj_ds1)", story)
+
     def test_player_respawn_event_uses_the_cosmos_respawn(self):
         # 2.8 "the crew died" idiom: an event gated on the player not existing that
         # re-creates it. Cosmos does this itself -- basic_player_destroy revives the SAME

@@ -250,6 +250,11 @@ turns polling into event-driven routes. Selectable with `--event-model`:
   - Multi-condition events stay polling loops **on purpose**: a pure route would miss the
     "gate flag opens after the object died / undocked" case that a per-tick loop catches.
 - **Flags** are `shared` + forward-declared (`default shared F = 0`) so concurrent tasks/routes read them.
+- **A failed guard in a chained scene skips that scene**, not the mission: an
+  `if_exists`/`if_not_exists` emits `jump event_<i+1> if ...`, and only the final scene
+  (which has no next) ends the task. These are one-shot tests, not waits -- 2.8 checks them
+  when the event is considered and moves on. Emitting `->END` here instead silently threw
+  away every remaining scene, which hit 862 chained scenes across 22 corpus missions.
 
 ---
 

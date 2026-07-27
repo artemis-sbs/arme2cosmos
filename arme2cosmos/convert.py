@@ -438,8 +438,11 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
 
     for i, ev in enumerate(seq_events):
         lines.append(f"--- event_{i}" + (f"   # {ev.name}" if ev.name != f"event_{i}" else ""))
+        # A guard that fails skips to the NEXT scene. The last one has no next, so there it
+        # ends the task -- which is also where the chain ends anyway.
+        nxt = f"event_{i + 1}" if i + 1 < len(seq_events) else None
         for c in ev.conditions:
-            lines.extend(emit_condition(em, c, i))
+            lines.extend(emit_condition(em, c, i, next_label=nxt))
         for n in ev.commands:
             lines.append(f"    # {_xml_one(n)}")
             lines.extend(em.emit_command(n))
