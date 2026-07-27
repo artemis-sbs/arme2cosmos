@@ -17,7 +17,7 @@ semantics: an ambiguous end-game event is emitted with a ``// TODO win or lose?`
 from __future__ import annotations
 
 from .emit import (Emitter, emit_condition, _cond_bool, _pyname, _mast_str, _value,
-                   _num_key, _phase_sig_name, _SIDE, _is_less)
+                   _num_key, _phase_sig_name, _SIDE, _is_less, to_ascii)
 from .model import Event, Mission, XmlNode
 
 # Keywords that classify an end-game decider event as a win or a loss (matched against
@@ -43,7 +43,8 @@ def _truthy(v: str) -> bool:
 
 
 def _xml_one(n: XmlNode) -> str:
-    attrs = " ".join(f'{k}="{v}"' for k, v in n.attrib.items())
+    """Source node -> provenance comment, ASCII-folded (see convert._xml_one)."""
+    attrs = " ".join(f'{k}="{to_ascii(v)}"' for k, v in n.attrib.items())
     return f"<{n.tag} {attrs}/>"
 
 
@@ -117,8 +118,12 @@ def _join_names(names: list) -> str:
 
 
 def _amd_text(s: str) -> str:
-    """One-line, ASCII-safe text for an AMD heading/value (engine text is ASCII-only)."""
-    s = (s or "").replace("^", " ").replace("\r", " ").replace("\n", " ")
+    """One-line, ASCII-safe text for an AMD heading/value (engine text is ASCII-only).
+
+    "ASCII-safe" was the claim; :func:`to_ascii` is what makes it true. A single byte the
+    engine's cp1252 read cannot decode fails the whole document load.
+    """
+    s = to_ascii(s).replace("^", " ").replace("\r", " ").replace("\n", " ")
     s = s.replace("[", "(").replace("]", ")")  # keep link syntax unambiguous
     return " ".join(s.split()).strip()
 
@@ -887,7 +892,8 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     # spliced in below create_sides, the order start_server fires the two signals in.
     player_route = _player_route_lines(mission, em)
     L.append(f'@map/{label} "{disp}"')
-    for d in mission.description.replace("^", " ").split("\n"):
+    # Folded for the same reason as the MAST target: engine-read text must be ASCII.
+    for d in to_ascii(mission.description).replace("^", " ").split("\n"):
         d = d.strip()
         if d:
             L.append(f'" {d}')

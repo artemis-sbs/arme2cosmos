@@ -10,6 +10,7 @@ internally); everything not mechanically translatable is emitted as a
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from .coverage import classify, FULL, PARTIAL
 from .model import Event, Mission, XmlNode
@@ -935,17 +936,46 @@ class Emitter:
 
 
 def _xml_repr(n: XmlNode) -> str:
-    attrs = " ".join(f'{k}="{v}"' for k, v in n.attrib.items())
+    """Source node -> a `# when:` / `# TODO` comment, ASCII-folded (see :func:`to_ascii`)."""
+    attrs = " ".join(f'{k}="{to_ascii(v)}"' for k, v in n.attrib.items())
     return f"<{n.tag} {attrs}/>"
+
+
+_ASCII_PUNCT = {"‘": "'", "’": "'", "“": '"', "”": '"',
+                    "–": "-", "—": "--", "…": "...", " ": " ",
+                    "×": "x", "°": " deg", "•": "*"}
+
+
+def to_ascii(s: str) -> str:
+    """Fold text down to ASCII. Engine text is ASCII-only, and not as a style rule.
+
+    ``MastStory.from_file`` reads with the platform codec -- cp1252 on Windows -- so ONE
+    byte it cannot decode fails the whole story load. Not the line, the story: no labels,
+    no ``@map``, and the mission silently never starts (the headless runner still reports
+    "PASS - no runtime errors", because nothing ran to error). MISS_JewelHeist did exactly
+    that on the three U+015D in its Ximni flavour text.
+
+    2.8 text is author-written and does contain this: smart quotes, accents, the odd
+    Esperanto diacritic. Punctuation is mapped to its ASCII twin, letters are stripped of
+    their accents (NFKD drops the combining marks, so ``s-circumflex`` -> ``s``), and
+    anything still non-ASCII becomes ``?`` rather than being dropped silently.
+    """
+    s = s or ""
+    for ch, rep in _ASCII_PUNCT.items():
+        s = s.replace(ch, rep)
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return s.encode("ascii", "replace").decode("ascii")
 
 
 def _mast_str(s: str) -> str:
     """Make 2.8 text safe inside a double-quoted MAST string literal.
 
     Collapses real newlines to spaces (2.8 uses ``^`` for line breaks, which the
-    a2x helpers convert at runtime), and escapes backslashes and double quotes.
+    a2x helpers convert at runtime), escapes backslashes and double quotes, and folds the
+    text to ASCII (see :func:`to_ascii` -- a stray non-ASCII byte costs the whole story).
     """
-    s = (s or "").replace("\\", "\\\\").replace('"', '\\"')
+    s = to_ascii(s).replace("\\", "\\\\").replace('"', '\\"')
     s = s.replace("\r", " ").replace("\n", " ").strip()
     return s
 

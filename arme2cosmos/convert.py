@@ -12,7 +12,7 @@ import re
 
 from .emit import (Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _value,
                    _side_key, _DEFAULT_PLAYER_SIDE, _AI_OVERRIDES_DEFAULT,
-                   player_slot_name, _num_key)
+                   player_slot_name, _num_key, to_ascii)
 from .model import Mission
 from .parser import parse_file
 
@@ -379,7 +379,9 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     # below is right to treat player_ship as already assigned (em.player_emitted).
     player_route = _player_route_lines(mission, em)
     lines.append(f'@map/{label} "{disp}"')
-    for d in mission.description.replace("^", " ").split("\n"):
+    # The 2.8 briefing is author-written prose -- fold it, or a smart quote in it costs the
+    # whole story load (see emit.to_ascii).
+    for d in to_ascii(mission.description).replace("^", " ").split("\n"):
         d = d.strip()
         if d:
             lines.append(f'" {d}')
@@ -1021,7 +1023,11 @@ def build_button_route(mission: Mission, em: Emitter, button_events: dict, *,
 
 
 def _xml_one(n) -> str:
-    attrs = " ".join(f'{k}="{v}"' for k, v in n.attrib.items())
+    """The source node, echoed into story.mast as a provenance comment.
+
+    Folded to ASCII like every other emitted string: a comment is still part of the file,
+    and one undecodable byte anywhere in it fails the whole story load (emit.to_ascii)."""
+    attrs = " ".join(f'{k}="{to_ascii(v)}"' for k, v in n.attrib.items())
     return f"<{n.tag} {attrs}/>"
 
 
@@ -1066,8 +1072,11 @@ def build_story_json(em: Emitter, lib_version: str = DEFAULT_LIB_VERSION) -> str
 def _yaml_scalar(s: str) -> str:
     """A YAML-safe scalar: plain when it can't confuse the parser, else a double-quoted
     scalar (so a colon/quote/`#` in a 2.8 description -- e.g. "one thing: TROUBLE!" --
-    doesn't break parsing). Double quotes keep apostrophes literal (no `''` doubling)."""
-    s = s.replace("\n", " ").strip()
+    doesn't break parsing). Double quotes keep apostrophes literal (no `''` doubling).
+
+    Folded to ASCII first: description.yaml is engine-read, and one byte its cp1252 read
+    cannot decode takes the whole file with it (see emit.to_ascii)."""
+    s = to_ascii(s).replace("\n", " ").strip()
     if s and not re.search(r"""[:#"'\[\]{}|>&*!%@`,]""", s) and s[0] not in "-?":
         return s
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'

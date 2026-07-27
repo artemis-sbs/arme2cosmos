@@ -573,6 +573,37 @@ class ConvertTests(unittest.TestCase):
         # whatever point the chain reached it
         self.assertNotIn("# You Died", story[:story.index("//shared/signal/player_ship_destroyed")])
 
+    def test_non_ascii_source_text_cannot_break_the_story_load(self):
+        # MastStory.from_file reads with the PLATFORM codec (cp1252 on Windows), so one
+        # byte it cannot decode fails the whole story: no labels, no @map, the mission
+        # silently never starts -- and the headless runner still says "PASS - no runtime
+        # errors" because nothing ran to error. MISS_JewelHeist did exactly that on the
+        # three U+015D in its Ximni flavour text. Every engine-read file must be ASCII.
+        xml = os.path.join(self.tmp.name, "MISS_Accents.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>A café – the “Quiet” sector…</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+    <incoming_comms_text from="Bunenag Aŝor" message="Mokamer Flaz — naïve…"/>
+  </start>
+</mission_data>
+""")
+        for target in ("mast", "amd"):
+            d = convert_file(xml, self.out + target, target=target)
+            for fn in os.listdir(d):
+                if not fn.endswith((".mast", ".amd", ".yaml", ".json")):
+                    continue
+                raw = open(os.path.join(d, fn), "rb").read()
+                raw.decode("cp1252")   # the engine's read -- must not raise
+                self.assertTrue(all(b < 128 for b in raw), f"{target}/{fn} is not ASCII")
+        # and the text survives readably rather than being dropped
+        with open(os.path.join(self.out + "mast", "accents", "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertIn("Bunenag Asor", story)
+        self.assertIn('"Quiet"', story)
+
     def test_amd_target_asks_for_the_quest_tab_that_displays_its_tree(self):
         # The AMD target's whole point is a live objectives log. `quests` is only the
         # DRIVER (quest_driver runs the tree); the log the crew actually reads is the quest
