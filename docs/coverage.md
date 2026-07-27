@@ -72,7 +72,7 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `if_distance` | **DONE** | `await distance_less/greater` (chain) / `a2x_distance_less/greater` (loops; object or point) |
 | `if_inside_sphere` / `if_outside_sphere` | **DONE** | `await distance_point_less/greater` (centre flipped) |
 | `if_inside_box` / `if_outside_box` | **DONE** | `a2x_in_box` guard |
-| `if_exists` / `if_not_exists` | **DONE** | live `object_exists` (loops) / `//damage/destroy` route (sole `if_not_exists` -> respawn) |
+| `if_exists` / `if_not_exists` | **DONE** | live `object_exists` (loops) / `//damage/destroy` route (sole `if_not_exists` -> respawn). `if_not_exists` on the PLAYER + a `create type="player"` -> the Cosmos player respawn (see Player respawn) |
 | `if_fleet_count` (<=0) | **DONE** | `await destroyed_all` (chain) / live `len(role("fleet_N"))` (loops) |
 | `if_docked` | **DONE** | `a2x_is_docked` (loops) / `//signal/ship_docked` route (sole `if_docked`) |
 | `if_timer_finished` | **DONE** | `is_timer_finished` |
@@ -168,6 +168,59 @@ player). Friendly stations carry that sideValue too; a player on a different sid
 its own station reads as hostile once diplomacy is declared.
 
 Runtime behaviour is pinned by `test_convert_sides` in the A2xTestRange suite.
+
+---
+
+## Player ships
+
+`PLAYER_CREATE_DEFAULT` is always written `False` -- LM's defaults are built on side
+`"tsn"`, which a converted mission never declares, so a crew that took one had empty
+diplomacy. The tool spawns every player ship itself, on the mission's own player side.
+
+**Where they spawn:** a `//shared/signal/create_player_ships` route, **not** the map task.
+The server console fires that signal inside `start_server` (right after `create_sides`,
+where LM builds its own `PLAYER_LIST` ships) -- which is *before* the crew reaches ship
+select. The map task runs at map LOAD, after the console menu, so ships spawned there were
+not in the list the crew picked from.
+
+Only `<start>` player creates move there. A 2.8 mission may also `create type="player"`
+from an **event** (MISS_Medusa's_Maze does); that is mid-mission gameplay and stays in its
+event -- and the roster fill below is skipped entirely for such a mission.
+
+2.8 always started with eight crewable ships while a mission usually positions only the
+slots it cares about, so the route fills the rest from `_DEFAULT_PLAYER_LIST` (LM's names
+and hulls) and marks them `a2x_spare_player`. All eight exist for ship select;
+`//shared/signal/game_started` then deletes the spares, leaving the ships the mission
+declared (or Artemis alone if it declared none). Deliberately **not** via `spawn_players`,
+which repositions ships near a friendly station and would discard the 2.8 coordinates.
+
+Because the route assigns `player_ship` before the map loads, the map's forward
+declaration is `default shared player_ship = None` -- a plain `shared ... = None` would
+throw the spawned ship away.
+
+### Player respawn
+
+A 2.8 mission handles death with an event gated on `<if_not_exists>` the player ship whose
+body re-creates it at the start position (MISS_HereThereBeMonsters' "Mission Report 3":
+failure card, outro timers, then a fresh Artemis). Cosmos owns that flow, so the tool
+routes it rather than re-emitting the create:
+
+* `settings.yaml` gets `PLAYER_SHIP_RESPAWN: true`. LM's `basic_player_destroy` then
+  revives the **same** ship agent 2s after death at its `spawn_pos` -- for a converted
+  mission, the 2.8 create's own coordinates -- and rebuilds its grid. It has to be a
+  *setting*: the addon reads it into a plain `shared`, not `default shared`, so a
+  story.mast assignment can lose to load order.
+* the rest of the event body becomes a `//shared/signal/player_ship_destroyed` route.
+* the `<create type="player">` is **dropped**. A fresh hull does not get the crew back --
+  the client-side `//signal/player_ship_destroyed` route has already sent them to
+  console-select, and they do not follow a new ship.
+* the `if_not_exists` condition is **not** part of the guard: it is what the signal means,
+  and it is not even true when the signal fires (the ship is still there, flagged
+  `exploded`). Every other condition stays, which is what preserves the 2.8 one-shot --
+  these events gate on a flag their own body clears.
+
+Difference to check by hand (flagged in MIGRATION_NOTES): LM revives on **every** death,
+where the 2.8 event was one-shot.
 
 ---
 

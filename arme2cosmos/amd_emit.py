@@ -743,7 +743,8 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     """Build the full ``--target amd`` scaffold (files dict). Populates em.addons/notes."""
     from .convert import (_slug, _display_name, _prescan_named_objects,
                           build_script_py, build_story_json, build_description_yaml,
-                          build_notes, build_button_route, build_gm_tree_routes)
+                          build_notes, build_button_route, build_gm_tree_routes,
+                          is_player_respawn_event, build_player_respawn_routes)
 
     _prescan_named_objects(mission, em)
     em.addons.add("quests")  # LM quest_driver reads the granted AMD
@@ -762,8 +763,14 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     # events become quests/beats, so button trees don't degrade into polling loops.
     comms_btn_events: dict[str, object] = {}
     gm_btn_events: dict[str, object] = {}
+    respawn_player_events = []
     plain_events = []
     for ev in mission.events:
+        # 2.8 player-respawn events go to Cosmos' own respawn, not a quest -- same as the
+        # MAST target (see convert.build_player_respawn_routes).
+        if is_player_respawn_event(ev, em):
+            respawn_player_events.append(ev)
+            continue
         cb = next((c for c in ev.conditions if c.tag == "if_comms_button"), None)
         gb = next((c for c in ev.conditions if c.tag == "if_gm_button"), None)
         gk = next((c for c in ev.conditions if c.tag == "if_gm_key"), None)
@@ -795,6 +802,7 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
         comment="# 2.8 comms buttons -> a //comms route (refine the gating/selection).",
         addons=["comms"])
     routes += build_gm_tree_routes(mission, em, gm_btn_events)
+    routes += build_player_respawn_routes(respawn_player_events, em)
     # 2.8 set_ship_text hailtext -> one gated Hail comms button showing the ship's stored
     # hail line (set as an a2x_hail inventory value where set_ship_text ran).
     if em.hails:
@@ -857,7 +865,7 @@ def _build_scans_amd(scans: dict) -> str:
 
 
 def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
-    from .convert import _player_default_lines
+    from .convert import _player_default_lines, _player_route_lines
     label = _slug(mission.name)
     disp = _display_name(mission)
     L: list[str] = [
@@ -867,8 +875,13 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
         "",
         *_player_default_lines(em),
         "",
-        f'@map/{label} "{disp}"',
     ]
+    # Same as the MAST target: the <start> player ships spawn from
+    # //shared/signal/create_player_ships so they exist at ship select, not at map load.
+    # Built here (before the map body) so the emitters below see player_ship assigned;
+    # spliced in below create_sides, the order start_server fires the two signals in.
+    player_route = _player_route_lines(mission, em)
+    L.append(f'@map/{label} "{disp}"')
     for d in mission.description.replace("^", " ").split("\n"):
         d = d.strip()
         if d:
@@ -878,7 +891,10 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     obj_vars = sorted(set(em.symbols.values()) | ({em.player_var} if em.player_var else set()))
     if obj_vars:
         L.append("    # objects forward-declared (shared so routes/watchers resolve them)")
-        L += [f"    shared {v} = None" for v in obj_vars]
+        # player_ship is already assigned by the create_player_ships route (which runs
+        # before the map loads), so it is declared `default` -- see the MAST target.
+        L += [f"    {'default shared' if player_route and v == em.player_var else 'shared'}"
+              f" {v} = None" for v in obj_vars]
     flag_vars = sorted({_pyname(n.get("name")) for n in mission.all_nodes()
                         if n.tag in ("set_variable", "if_variable") and n.get("name")})
     flag_vars = [f for f in flag_vars if f not in obj_vars]
@@ -888,19 +904,14 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     L.append("")
 
     L.append("    # --- start block ---")
-    from .convert import start_nodes, _CONSOLE_ADDRESSED_START, _player_fill_lines
-    _players = [n for n in start_nodes(mission) if n.kind_key() == "create:player"]
-    if not _players:
-        # No 2.8 player create at all -- spawn the roster up front so the mission is
-        # playable (game_started keeps Artemis and drops the spares).
-        L.extend(_player_fill_lines(em, _players, mission))
+    from .convert import start_nodes, _CONSOLE_ADDRESSED_START
     for n in start_nodes(mission):
         if n.tag in _CONSOLE_ADDRESSED_START:
             continue   # deferred to //shared/signal/game_started, same as the MAST target
+        if n.kind_key() == "create:player":
+            continue   # hoisted to //shared/signal/create_player_ships, same as MAST
         L.append(f"    # {_xml_one(n)}")
         L.extend(em.emit_command(n))
-        if _players and n is _players[-1]:
-            L.extend(_player_fill_lines(em, _players, mission))
     L.append("")
 
     if builder.roles:
@@ -993,7 +1004,7 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     # Same side declaration the MAST target emits -- spliced in ahead of the map now that
     # every sideValue the mission touches is known. See convert._create_sides_lines.
     from .convert import _create_sides_lines, _map_label_index, _game_started_lines
-    L[_map_label_index(L):_map_label_index(L)] = _create_sides_lines(em)
+    L[_map_label_index(L):_map_label_index(L)] = _create_sides_lines(em) + player_route
     # ...and the start block's console-addressed messages, which must wait for the crew to
     # be at consoles or they are silently dropped. See convert._game_started_lines.
     L += _game_started_lines(mission, em)

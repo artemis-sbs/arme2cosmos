@@ -72,10 +72,25 @@ _PLAYER_FILL_SPACING = 1000
 # Where the roster goes when the mission positions nobody (2.8 map centre).
 _PLAYER_FILL_ORIGIN = (50000, 0, 50000)
 
+# The 2.8 playing field on X and Z. Only the FILL positions are held inside it: a mission
+# that puts its own ship at 98000 usually meant it -- the crew starts at the edge and flies
+# in -- so its coordinates are emitted untouched. The fill ships are the tool's invention,
+# and a2x_pos mirrors about 100000, so one laid out past the edge lands on a negative
+# Cosmos coordinate: off the map, where the crew would see it in ship select and never
+# find it in the world.
+_MAP_MIN, _MAP_MAX = 0, 100000
+
 # Role marking a spawned player ship the mission did not ask for. All eight exist at
 # console-select so the crew can pick a hull; game_started then deletes the spares, so
 # play starts with exactly the ships the mission declared (or Artemis alone).
 _SPARE_PLAYER_ROLE = "a2x_spare_player"
+
+
+def _on_map(v: float) -> float:
+    """Hold a tool-invented FILL coordinate inside the 2.8 playing field. Backstop for the
+    layout direction: a base point already off the map would otherwise take the whole
+    roster with it."""
+    return min(max(v, _MAP_MIN), _MAP_MAX)
 
 
 def _mission_player_creates(mission: Mission) -> list:
@@ -124,6 +139,9 @@ def _player_fill_lines(em: Emitter, players: list, mission: Mission | None = Non
     # mission is playable. Everything past that is a spare, marked at CREATION so
     # game_started can delete it without having to work out which is which.
     keep = max(len(players), 1)
+    # Run the line toward whichever side of the base point has more room, so a mission that
+    # starts its crew hard against an edge (98000) does not push the fill off the map.
+    step = _PLAYER_FILL_SPACING if (_MAP_MAX - bz) >= (bz - _MAP_MIN) else -_PLAYER_FILL_SPACING
     out = [f"    # 2.8 always started with {len(_DEFAULT_PLAYER_LIST)} crewable ships; this mission "
            f"positions {len(players)}.",
            f"    # All {len(_DEFAULT_PLAYER_LIST)} exist for ship select; game_started deletes the",
@@ -136,9 +154,9 @@ def _player_fill_lines(em: Emitter, players: list, mission: Mission | None = Non
             continue
         if i >= len(_DEFAULT_PLAYER_LIST):
             break
-        z = bz + _PLAYER_FILL_SPACING * (i - len(players) + 1)
+        z = _on_map(bz + step * (i - len(players) + 1))
         roles = side if i < keep else f"{side}, {_SPARE_PLAYER_ROLE}"
-        out.append(f'    a2x_create_player({bx:g}, {by:g}, {z:g}, "{spec["ship"]}", '
+        out.append(f'    a2x_create_player({_on_map(bx):g}, {by:g}, {z:g}, "{spec["ship"]}", '
                    f'name="{spec["name"]}", side="{roles}")')
         i += 1
     return out
@@ -159,6 +177,121 @@ def _player_default_lines(em: Emitter) -> list[str]:
             "PLAYER_CREATE_DEFAULT = False"]
 
 
+def _player_route_lines(mission: Mission, em: Emitter) -> list[str]:
+    """The ``//shared/signal/create_player_ships`` route holding the START block's player
+    ships (plus the roster fill), so they exist before the crew picks a console.
+
+    The map task is the wrong place for them. It runs when the map LOADS -- after the
+    server console has already offered ship select -- so the crew was choosing from
+    whatever hulls existed at that point, and the mission's own ships appeared underneath
+    them. ``create_player_ships`` is the hook the server console fires inside start_server,
+    right after ``create_sides`` and before the menu, which is where LegendaryMissions
+    builds its own PLAYER_LIST ships. Spawning here puts the mission's ships in the list
+    the crew actually picks from.
+
+    Only ``<start>`` player creates move. A 2.8 mission may also create a player from an
+    EVENT (MISS_Medusa's_Maze does); those stay where the event puts them, because they
+    are mid-mission gameplay, not the starting roster.
+    """
+    players = [n for n in start_nodes(mission) if n.kind_key() == "create:player"]
+    fill = _player_fill_lines(em, players, mission)
+    if not players and not fill:
+        return []   # the mission makes its crew from an event -- leave it there
+    out = ["# 2.8 <start> player ships. Fired by the server console during start_server,",
+           "# after create_sides and BEFORE ship select, so the crew picks from the ships",
+           "# this mission declares (the map task would run too late -- it loads after the",
+           "# console menu). Player creates inside 2.8 EVENTS stay in their event.",
+           "//shared/signal/create_player_ships"]
+    for n in players:
+        out.append(f"    # {_xml_one(n)}")
+        out.extend(em.emit_command(n))
+    out.extend(fill)
+    # Safe to end the task: a //shared/signal route is dispatched on its own spawned task
+    # (signal_register defaults is_jump, and emit_signal start_task()s it), so ->END stops
+    # this handler only -- not the server-start task that emitted the signal.
+    out.append("    ->END")
+    out.append("")
+    return out
+
+
+def is_player_respawn_event(ev, em: Emitter) -> bool:
+    """The 2.8 "the crew died" respawn idiom: an event gated on the player ship no longer
+    existing whose body re-creates it (MISS_HereThereBeMonsters' "Mission Report 3" shows
+    the failure card, starts the outro timers, then re-creates Artemis at the start point).
+
+    Cosmos has this built in, so the tool routes the event onto it rather than re-emitting
+    the create -- see :func:`build_player_respawn_routes`.
+    """
+    if not any(n.kind_key() == "create:player" for n in ev.commands):
+        return False
+    return any(c.tag == "if_not_exists" and _names_player(c, em) for c in ev.conditions)
+
+
+def _names_player(c, em: Emitter) -> bool:
+    """Does this condition name the player ship (by 2.8 name, or by player_slot)?"""
+    if c.get("name"):
+        return em.symbols.get(c.get("name")) == em.player_var and em.player_var is not None
+    return c.get("player_slot") is not None
+
+
+def build_player_respawn_routes(events: list, em: Emitter) -> list[str]:
+    """2.8 player-respawn events -> LegendaryMissions' own respawn + a
+    ``//shared/signal/player_ship_destroyed`` route carrying the rest of the event.
+
+    The 2.8 body is kept (failure card, timers, flags) but its ``create type="player"`` is
+    DROPPED, because Cosmos already does that better. With ``PLAYER_SHIP_RESPAWN`` on,
+    ``basic_player_destroy`` revives the SAME ship agent 2s after death at its ``spawn_pos``
+    -- which for a converted mission is the 2.8 create's own coordinates -- and rebuilds its
+    grid. Re-creating a ship instead would leave the crew behind: the client route has
+    already bounced them to console-select, and they do not follow a brand-new hull.
+
+    The ``if_not_exists`` condition is deliberately NOT part of the guard. It is what the
+    signal MEANS, and it is not even true yet when the signal fires: the ship is still there
+    (flagged ``exploded``) and is only deleted/revived afterwards, so testing it here would
+    make the route never run. Every OTHER condition stays as a guard, which is also what
+    preserves the one-shot 2.8 behaviour -- these events gate on a flag their own body
+    clears.
+    """
+    if not events:
+        return []
+    # settings.yaml, merged over the built-in defaults by settings_get_defaults(). It has to
+    # be a SETTING: basic_player_destroy reads it into a plain `shared` (not `default
+    # shared`), so a story.mast assignment can be clobbered depending on load order.
+    em.settings["PLAYER_SHIP_RESPAWN"] = True
+    em.note("player respawn: settings.yaml turns PLAYER_SHIP_RESPAWN on, so EVERY player "
+            "death revives the ship. The 2.8 event was one-shot -- if the mission meant "
+            "'one extra life', gate it by hand or turn the setting off.")
+    out = ["",
+           "# 2.8 player-respawn event -> Cosmos' own player respawn. settings.yaml sets",
+           "# PLAYER_SHIP_RESPAWN, so LegendaryMissions' basic_player_destroy revives the",
+           "# SAME ship 2s after death at its spawn point (the 2.8 create's coordinates)",
+           "# and rebuilds its grid. The 2.8 <create type=\"player\"> is dropped: a fresh",
+           "# hull would not get the crew back, whose clients the destroy route has already",
+           "# sent to console-select. What is left here is the mission's own reaction."]
+    for ev in events:
+        out.append(f"//shared/signal/player_ship_destroyed   # {ev.name} (was if_not_exists)")
+        bools, unhandled = [], []
+        for c in ev.conditions:
+            if c.tag == "if_not_exists" and _names_player(c, em):
+                continue   # that IS this signal (and is not true yet when it fires)
+            b = _cond_bool(em, c)
+            (bools.append(b) if b else unhandled.append(c))
+        for c in unhandled:
+            out.append(f"    # when (verify by hand): {_xml_one(c)}")
+        if bools:
+            out.append(f"    ->END if not ({' and '.join(bools)})")
+        for n in ev.commands:
+            out.append(f"    # {_xml_one(n)}")
+            if n.kind_key() == "create:player":
+                out.append("    # ^ dropped: respawn_player_ship revives the ship the crew "
+                           "is already on.")
+                continue
+            out.extend(em.emit_command(n))
+        out.append("    ->END")
+        out.append("")
+    return out
+
+
 def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid") -> str:
     _prescan_named_objects(mission, em)
     em.emit_scan_roles = True  # recover set_ship_text scan_desc / hailtext (see below)
@@ -172,6 +305,9 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     lines.append("")
     lines.extend(_player_default_lines(em))
     lines.append("")
+    # Built BEFORE the map body: the route runs before the map loads, so every emitter
+    # below is right to treat player_ship as already assigned (em.player_emitted).
+    player_route = _player_route_lines(mission, em)
     lines.append(f'@map/{label} "{disp}"')
     for d in mission.description.replace("^", " ").split("\n"):
         d = d.strip()
@@ -182,7 +318,11 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     if obj_vars:
         lines.append("    # objects forward-declared (shared so concurrent event tasks see them)")
         for v in obj_vars:
-            lines.append(f"    shared {v} = None")
+            # player_ship is filled in by //shared/signal/create_player_ships, which has
+            # ALREADY run by the time the map loads -- `shared player_ship = None` here
+            # would throw the spawned ship away. `default` leaves an existing value alone.
+            kw = "default shared" if player_route and v == em.player_var else "shared"
+            lines.append(f"    {kw} {v} = None")
     # flags forward-declared (shared) so independent-event tasks can poll/guard on them
     flag_vars = sorted({_pyname(n.get("name")) for n in mission.all_nodes()
                         if n.tag in ("set_variable", "if_variable") and n.get("name")})
@@ -199,8 +339,15 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     # console), not linear-chain labels.
     comms_btn_events: dict[str, object] = {}
     gm_btn_events: dict[str, object] = {}
+    respawn_player_events = []
     plain_events = []
     for ev in mission.events:
+        # "player is gone -> re-create it" is engine-driven in Cosmos; pull those out before
+        # anything else, or they land in the scene chain and only get one shot at whatever
+        # point the chain reaches them (2.8 had them armed from the start).
+        if is_player_respawn_event(ev, em):
+            respawn_player_events.append(ev)
+            continue
         cb = next((c for c in ev.conditions if c.tag == "if_comms_button"), None)
         gb = next((c for c in ev.conditions if c.tag == "if_gm_button"), None)
         gk = next((c for c in ev.conditions if c.tag == "if_gm_key"), None)
@@ -261,21 +408,17 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
         "scene chain": len(seq_events), "polling loops": len(loop_events),
         "respawn routes": len(respawn_events), "dock routes": len(dock_events),
         "flag-signal routes": len(flag_events),
+        "player-respawn routes": len(respawn_player_events),
     }
 
     lines.append("    # --- start block ---")
-    _players = [n for n in start_nodes(mission) if n.kind_key() == "create:player"]
-    if not _players:
-        # No 2.8 player create at all -- spawn the roster up front so the mission is
-        # playable (game_started keeps Artemis and drops the spares).
-        lines.extend(_player_fill_lines(em, _players, mission))
     for n in start_nodes(mission):
         if n.tag in _CONSOLE_ADDRESSED_START:
             continue   # deferred to //shared/signal/game_started (see _game_started_lines)
+        if n.kind_key() == "create:player":
+            continue   # hoisted to //shared/signal/create_player_ships (runs before select)
         lines.append(f"    # {_xml_one(n)}")
         lines.extend(em.emit_command(n))
-        if _players and n is _players[-1]:
-            lines.extend(_player_fill_lines(em, _players, mission))
     lines.append("")
 
     if em.scans:  # 2.8 set_ship_text scan_desc -> declarative science scans (scans.amd)
@@ -365,6 +508,7 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
             lines.append("    ->END")  # fire-once self-guard (or nothing to loop on)
         lines.append("")
 
+    lines.extend(build_player_respawn_routes(respawn_player_events, em))
     lines.extend(build_button_route(
         mission, em, comms_btn_events, set_tag="set_comms_button",
         header="//comms", handler_tag="if_comms_button",
@@ -383,8 +527,10 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
             'title="Hail")',
         ]
     # Every sideValue the mission touches is known only now, so splice the side
-    # declaration in ahead of the map (it must run before anything spawns).
-    lines[_map_label_index(lines):_map_label_index(lines)] = _create_sides_lines(em)
+    # declaration in ahead of the map (it must run before anything spawns) -- and the
+    # player route after it, matching the order start_server fires the two signals in.
+    lines[_map_label_index(lines):_map_label_index(lines)] = (
+        _create_sides_lines(em) + player_route)
     lines += _game_started_lines(mission, em)
     return "\n".join(lines) + "\n"
 
@@ -851,6 +997,21 @@ def _yaml_scalar(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def build_settings_yaml(em: Emitter) -> str:
+    """The mission's ``settings.yaml`` -- only the keys the conversion needs flipped.
+
+    ``settings_get_defaults()`` merges this file over the built-in defaults, so anything
+    left out keeps its default. This is the right place for a setting an LM addon reads
+    into a plain ``shared`` (rather than ``default shared``), where a story.mast assignment
+    could be clobbered by load order.
+    """
+    out = ["# Settings this conversion needs. Merged over the Cosmos defaults by",
+           "# settings_get_defaults(); everything not listed keeps its default value."]
+    for k, v in sorted(em.settings.items()):
+        out.append(f"{k}: {'true' if v is True else 'false' if v is False else v}")
+    return "\n".join(out) + "\n"
+
+
 def build_description_yaml(mission: Mission) -> str:
     # The six keys every Cosmos description.yaml is expected to carry (matches the
     # production missions: format version, Category, Category Priority, Visible Mission
@@ -942,6 +1103,11 @@ def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSIO
         if em.scans:  # recovered 2.8 scan_desc as declarative science scans
             from .amd_emit import _build_scans_amd
             files["scans.amd"] = _build_scans_amd(em.scans)
+
+    # Only written when the conversion actually needs a setting flipped -- an empty
+    # settings.yaml would shadow nothing but is one more file to explain.
+    if em.settings:
+        files["settings.yaml"] = build_settings_yaml(em)
 
     out_dir = os.path.join(out_root, _slug(mission.name))
     os.makedirs(out_dir, exist_ok=True)

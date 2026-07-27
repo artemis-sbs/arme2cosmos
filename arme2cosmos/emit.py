@@ -222,6 +222,9 @@ class Emitter:
         # 2.8 object names referenced by a later command/condition (not the create) -- a
         # monster with a referenced name needs the capturable path, not a prefab_spawn.
         self.referenced_names: set[str] = set()
+        # Cosmos SETTINGS the conversion needs turned on (written to settings.yaml, which
+        # settings_get_defaults merges over the built-ins). Only written when non-empty.
+        self.settings: dict[str, object] = {}
 
     def _art(self, n: XmlNode, default: str) -> str:
         """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),

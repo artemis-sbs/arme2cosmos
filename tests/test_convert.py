@@ -120,7 +120,9 @@ class ConvertTests(unittest.TestCase):
         # ahead of default player ships and any map.
         self.assertLess(story.index("//shared/signal/create_sides"), story.index("@map/"))
         # the route runs inline in the server-start task -- an ->END would end the caller.
-        route = story[story.index("//shared/signal/create_sides"):story.index("@map/")]
+        # Bounded at the NEXT route label: create_player_ships follows it, before the map.
+        body = story[story.index("//shared/signal/create_sides"):story.index("@map/")]
+        route = body[:body.index("//shared/signal/create_player_ships")]
         self.assertNotIn("->END", route)
 
     def test_player_and_friendly_station_share_a_side(self):
@@ -329,6 +331,142 @@ class ConvertTests(unittest.TestCase):
         self.assertLess(spawn, use, "player create must be emitted before it is referenced")
         # and the reference resolves to the variable, not a not-yet-assigned forward decl
         self.assertIn("hangar_random_craft_spawn(player_ship,", story)
+
+    def test_start_players_spawn_from_create_player_ships_route(self):
+        # The map task runs when the map LOADS -- after the server console has offered
+        # ship select -- so player ships spawned there were not in the list the crew picked
+        # from. create_player_ships is fired inside start_server (right after create_sides,
+        # before the menu), which is where LM builds its own PLAYER_LIST ships.
+        _, story, _ = self._convert()
+        self.assertIn("//shared/signal/create_player_ships", story)
+        route = story[story.index("//shared/signal/create_player_ships"):]
+        route = route[:route.index("@map/")]
+        self.assertEqual(route.count("a2x_create_player("), 8)  # the one create + the fill
+        # nothing spawns a player from the map task any more
+        self.assertNotIn("a2x_create_player(", story[story.index("@map/"):])
+        # ...and it runs before the map, after the sides it needs
+        self.assertLess(story.index("//shared/signal/create_sides"),
+                        story.index("//shared/signal/create_player_ships"))
+        self.assertLess(story.index("//shared/signal/create_player_ships"),
+                        story.index("@map/"))
+        # the route already assigned player_ship, so the map must not reset it to None
+        self.assertIn("    default shared player_ship = None", story)
+        self.assertNotIn("\n    shared player_ship = None", story)
+
+    RESPAWN_XML = """<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Respawn.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" name="Artemis" sideValue="2"/>
+  </start>
+  <event name="You Died">
+    <if_not_exists name="Artemis"/>
+    <if_variable name="Mission_Complete" comparator="EQUALS" value="1.0"/>
+    <big_message title="Mission Failed!" subtitle1="You are Dead"/>
+    <set_variable name="Mission_Complete" value="0.0"/>
+    <create type="player" player_slot="0" x="1" y="0" z="2" name="Artemis" sideValue="2"/>
+  </event>
+</mission_data>
+"""
+
+    def _convert_respawn(self, target):
+        xml = os.path.join(self.tmp.name, f"MISS_Died{target}.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write(self.RESPAWN_XML)
+        d = convert_file(xml, self.out, target=target)
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            return d, f.read()
+
+    def test_player_respawn_event_uses_the_cosmos_respawn(self):
+        # 2.8 "the crew died" idiom: an event gated on the player not existing that
+        # re-creates it. Cosmos does this itself -- basic_player_destroy revives the SAME
+        # ship at its spawn point when PLAYER_SHIP_RESPAWN is on -- and re-creating instead
+        # loses the crew, whose clients the destroy route already sent to console-select.
+        d, story = self._convert_respawn("mast")
+        with open(os.path.join(d, "settings.yaml"), encoding="utf-8") as f:
+            self.assertIn("PLAYER_SHIP_RESPAWN: true", f.read())
+        route = story[story.index("//shared/signal/player_ship_destroyed"):]
+        route = route[:route.index("\n\n")]
+        # the mission's own reaction is kept...
+        self.assertIn('a2x_big_message("Mission Failed!", "You are Dead"', route)
+        # ...its other condition still guards (which is what keeps the 2.8 one-shot: the
+        # body clears the very flag the guard reads)...
+        self.assertIn("->END if not (Mission_Complete == 1.0)", route)
+        # ...but if_not_exists does NOT, because that is what the signal means -- and the
+        # ship still exists (flagged "exploded") at the moment it fires.
+        self.assertNotIn("object_exists", route)
+        # the duplicate create is dropped: only the <start> roster spawns players
+        self.assertNotIn("a2x_create_player(", route)
+        self.assertEqual(story.count("a2x_create_player("), 8)
+        # and it is no longer a scene in the chain, where it would only get one shot at
+        # whatever point the chain reached it
+        self.assertNotIn("# You Died", story[:story.index("//shared/signal/player_ship_destroyed")])
+
+    def test_player_respawn_event_routed_in_the_amd_target_too(self):
+        d, story = self._convert_respawn("amd")
+        self.assertIn("//shared/signal/player_ship_destroyed", story)
+        self.assertTrue(os.path.exists(os.path.join(d, "settings.yaml")))
+
+    def test_no_settings_yaml_when_nothing_needs_one(self):
+        # settings.yaml is written only when a setting must be flipped -- an empty one is
+        # just another file for the porter to explain.
+        d = convert_file(self.xml, self.out, target="mast")
+        self.assertFalse(os.path.exists(os.path.join(d, "settings.yaml")))
+
+    def test_roster_fill_stays_on_the_map(self):
+        # The fill is laid out along Z from the mission's own player ship. A 2.8 mission
+        # that starts its crew hard against an edge (98000 -- they meant it: the crew flies
+        # in from there) pushed the fill past 100000, and a2x_pos mirrors about 100000, so
+        # those hulls landed on NEGATIVE Cosmos coords: pickable at ship select, nowhere in
+        # the world. The mission's own coordinates are still emitted untouched.
+        xml = os.path.join(self.tmp.name, "MISS_Edge.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Edge.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="98000" y="0" z="98000" sideValue="2"/>
+  </start>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertIn('a2x_create_player(98000, 0, 98000,', story)   # the mission's own
+        zs = [float(l.split("a2x_create_player(")[1].split(",")[2])
+              for l in story.splitlines() if "a2x_create_player(" in l]
+        self.assertEqual(len(zs), 8)
+        for z in zs:
+            self.assertGreaterEqual(z, 0)
+            self.assertLessEqual(z, 100000)
+        # laid out AWAY from the edge, still 1000 apart -- not stacked on the clamp
+        self.assertEqual(sorted(zs), [91000, 92000, 93000, 94000,
+                                      95000, 96000, 97000, 98000])
+
+    def test_player_created_in_an_event_stays_in_the_event(self):
+        # Only <start> players are the starting roster. MISS_Medusa's_Maze spawns a player
+        # from an EVENT -- that is mid-mission gameplay and must not be hoisted to server
+        # start (nor must the roster fill kick in and add eight ships alongside it).
+        xml = os.path.join(self.tmp.name, "MISS_LatePlayer.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Late player.</mission_description>
+  <start>
+    <create type="station" x="1" y="0" z="2" name="DS1" sideValue="2"/>
+  </start>
+  <event>
+    <if_timer_finished name="t1"/>
+    <create type="player" player_slot="0" x="5" y="0" z="6" sideValue="2"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertNotIn("//shared/signal/create_player_ships", story)
+        self.assertEqual(story.count("a2x_create_player("), 1)
+        self.assertGreater(story.index("a2x_create_player("), story.index("@map/"))
 
     def test_sides_are_not_collapsed_onto_lm_keys(self):
         # 2.8 sideValue is a faction index, not a 3-valued enum: MISS_The_Arena puts
