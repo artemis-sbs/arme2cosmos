@@ -272,6 +272,18 @@ class Emitter:
         return f"    {expr}"
 
     def _xyz(self, n: XmlNode, px="x", py="y", pz="z"):
+        """The 2.8 coordinates a command spawns at -- literal, or the GM's live position.
+
+        ``use_gm_position="yes"`` means "wherever the GM is pointing", and the node's own
+        x/y/z are then leftovers (usually 0). Nothing read the attribute, so 351 corpus
+        commands -- almost all of them GM buttons that spawn a ship in front of the GM --
+        put their object at the map corner instead. a2x_gm_coords returns the gamemaster
+        console ship's position already expressed in 2.8 coordinates, so it flows through
+        the same flip every other position takes.
+        """
+        if n.get("use_gm_position") is not None:
+            self.addons.update({"gamemaster", "gamemaster_comms"})
+            return ("_gm[0]", "_gm[1]", "_gm[2]")
         return (n.get(px, "0"), n.get(py, "0"), n.get(pz, "0"))
 
     def _player_ref(self, n: XmlNode | None = None, slot=None) -> str | None:
@@ -335,7 +347,15 @@ class Emitter:
             self.note(f"[{cov.status}] {kind}: {cov.note}")
             return [f"    # TODO [{cov.status}] {kind}: {cov.note}",
                     f"    #   {_xml_repr(n)}"]
-        return fn(self, n)
+        out = fn(self, n)
+        if n.get("use_gm_position") is not None and any("_gm[" in ln for ln in out):
+            # Resolve the GM's live position once, here, rather than in _xyz: this is the
+            # one place that can put a line BEFORE whatever the command emitted, and it
+            # covers a `use_gm_position` in an ordinary event as well as in a GM button
+            # (83 of the corpus's 351 are in plain events, where COMMS_ORIGIN does not
+            # exist -- a2x_gm_coords falls back to the gamemaster role).
+            out = [f"{' ' * (len(out[0]) - len(out[0].lstrip()))}_gm = a2x_gm_coords()"] + out
+        return out
 
     def c_station(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)

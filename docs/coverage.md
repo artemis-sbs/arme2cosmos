@@ -58,6 +58,7 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `get_object_property` / `if_object_property` | **DONE** | `a2x_object_property(obj, prop)` reads any mapped prop back |
 | `set_fleet_property` | **DONE** | fleetSpacing/fleetMaxRadius -> `a2x_set_fleet_property` -> the general `fleet_spacing`/`fleet_max_radius` formation-ring keys the LM scatter brain reads |
 | `set_to_gm_position` | **DONE** | `a2x_set_to_gm_position` -> move the GM-selected object to the gamemaster console ship's position |
+| `use_gm_position` (attribute) | **DONE** | on any `create` / `destroy_near`: `_gm = a2x_gm_coords()` then the usual 2.8 coords. The GM anchor is the gamemaster console ship; gm_coords returns 2.8 coordinates so it flows through the same flip. Unread before, so 351 corpus commands spawned at the map corner |
 | `set_damcon_members` | **DONE** | `a2x_set_damcon_members` -> the HP of the Cosmos damcon teams DC1..DC3 (value = team HP) |
 | `set_player_carried_type` | **DONE** | `hangar_random_craft_spawn` into the player hangar; the named craft is CAPTURED so later references resolve. `player_slot` with no create:player -> `a2x_player_ship(slot)` |
 | `clear_player_station_carried` | **DONE** | `a2x_clear_station_carried` -> delete a station's standby (in-hangar) craft, leaving launched ones flying |

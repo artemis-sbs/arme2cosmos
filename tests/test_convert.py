@@ -407,6 +407,42 @@ class ConvertTests(unittest.TestCase):
                         story.index('a2x_big_message("MISSION SUCCESS"'))
         self.assertNotIn("# when: fleet None", story)
 
+    def test_use_gm_position_spawns_at_the_gm_not_the_map_corner(self):
+        # 2.8 use_gm_position="yes" means "wherever the GM is pointing"; the node's own
+        # x/y/z are leftovers (usually 0). Nothing read the attribute, so 351 corpus
+        # commands -- mostly GM buttons meant to drop a ship in front of the GM -- spawned
+        # at the map corner. Works in a plain event too, where COMMS_ORIGIN does not exist.
+        xml = os.path.join(self.tmp.name, "MISS_GmPos.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>GM pos.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+    <set_gm_button text="Spawn/Enemy [E]"/>
+  </start>
+  <event>
+    <if_gm_button text="Spawn/Enemy [E]"/>
+    <create type="enemy" x="0" y="0" z="0" use_gm_position="yes" sideValue="1"/>
+  </event>
+  <event name="Plain">
+    <if_timer_finished name="t"/>
+    <destroy_near type="mines" radius="5000" use_gm_position="yes"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast", event_model="linear")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # the GM's live position is resolved once, then fed through the usual 2.8 flip
+        self.assertIn("_gm = a2x_gm_coords()", story)
+        self.assertIn("a2x_create_enemy(_gm[0], _gm[1], _gm[2],", story)
+        # ...and it works outside a GM handler too
+        self.assertIn('a2x_destroy_near(_gm[0], _gm[1], _gm[2], 5000, "mines")', story)
+        # the map corner must not survive as the spawn point
+        self.assertNotIn("a2x_create_enemy(0, 0, 0,", story)
+        self.assertEqual(story.count("_gm = a2x_gm_coords()"), 2)
+
     def test_gm_hotkey_that_only_repeats_a_button_is_dropped(self):
         # 2.8 advertises a button's shortcut in its own label ("... [N]") and then defines
         # an if_gm_key event for that key. Cosmos has no GM hotkeys, so each key became a
