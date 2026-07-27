@@ -407,6 +407,46 @@ class ConvertTests(unittest.TestCase):
                         story.index('a2x_big_message("MISSION SUCCESS"'))
         self.assertNotIn("# when: fleet None", story)
 
+    def test_unset_timer_does_not_fire_at_t0(self):
+        # is_timer_finished answers True for a timer that was NEVER SET ("nothing pending"
+        # reads as done), so a guard on one is true from the first tick. Four corpus
+        # missions ran their end-game loop immediately and called show_game_results seconds
+        # in. 2.8 does not fire an event on a timer that never started.
+        xml = os.path.join(self.tmp.name, "MISS_Timer.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Timer.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+  </start>
+  <event name="Arm it">
+    <if_distance name1="Artemis" player_slot2="0" comparator="LESS" value="500"/>
+    <set_timer name="game_end" seconds="60"/>
+  </event>
+  <event name="The end">
+    <if_timer_finished name="game_end"/>
+    <end_mission/>
+  </event>
+  <event name="Never armed">
+    <if_timer_finished name="ghost_timer"/>
+    <log text="should not fire at t=0"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast", event_model="linear")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # a timer the mission really sets -> wait for it to be set AND expire
+        self.assertIn('await is_timer_set_and_finished(0, "game_end")', story)
+        # a timer nothing ever sets can never fire in 2.8 either -- skip the scene rather
+        # than block the chain forever on something that is not coming. (Skip is a jump to
+        # the next scene, or ->END on the last one, which this is.)
+        self.assertRegex(story, r'(?:jump event_\d+|->END) if not '
+                                r'\(is_timer_set_and_finished\(0, "ghost_timer"\)\)')
+        # the bare form must be gone everywhere: it is true before the timer exists
+        self.assertNotIn("is_timer_finished(0,", story)
+
     def test_chained_flag_latch_skips_and_phase_gate_waits(self):
         # The two things a 2.8 flag test means need OPPOSITE translations in a chain, and
         # getting it backwards is worse than the comment it replaces:

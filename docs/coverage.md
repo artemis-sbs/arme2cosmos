@@ -75,7 +75,7 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `if_exists` / `if_not_exists` | **DONE** | live `object_exists` (loops) / `//damage/destroy` route (sole `if_not_exists` -> respawn). `if_not_exists` on the PLAYER + a `create type="player"` -> the Cosmos player respawn (see Player respawn) |
 | `if_fleet_count` (<=0) | **DONE** | `await destroyed_all` (chain) / live `len(role("fleet_N"))` (loops) |
 | `if_docked` | **DONE** | `a2x_is_docked` (loops) / `//signal/ship_docked` route (sole `if_docked`) |
-| `if_timer_finished` | **DONE** | `is_timer_finished` |
+| `if_timer_finished` | **DONE** | `is_timer_set_and_finished` -- NOT `is_timer_finished`, which answers True for a timer that was never set, so the guard was true from t=0. A timer no `set_timer` in the mission ever starts can never fire in 2.8 either, so a chained scene waiting on one is skipped rather than left to block |
 | `if_variable` | **DONE** | live boolean guard (loops) / `//signal/a2x_flag_F` route (sole `==`) |
 | `if_difficulty` | **DONE** | live `DIFFICULTY <op> v` boolean (in polling loops) |
 | `if_monster_tag_matches` / `if_object_tag_matches` | **PARTIAL** | inventory guard (tagging gameplay TODO) |

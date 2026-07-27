@@ -220,6 +220,9 @@ class Emitter:
         self.hails: dict[str, str] = {}
         self.hail_done: set[str] = set()  # objects already given their stored hail value
         self.wait_prop_n = 0  # unique-label counter for chained-scene poll waits
+        # Timer names any set_timer in the mission actually starts. A condition naming a
+        # timer NOTHING sets can never fire in 2.8, so waiting on it would hang the chain.
+        self.timers_set: set[str] = set()
         # What a chained scene's if_variable becomes: id(condition node) -> "skip" | "wait".
         # Decided by convert.plan_chain_flag_gates, which can see the chain ORDER and who
         # sets each flag; an absent entry means it stays a comment.
@@ -1268,7 +1271,15 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0,
             return _wait_until(em, var_cond_bool(n), "flag")
         return [f'    # guard: {_pyname(n.get("name"))} {n.get("comparator","")} {n.get("value","")}']
     if tag == "if_timer_finished":
-        return [f'    await is_timer_finished(0, "{n.get("name")}")']
+        # is_timer_finished says True for a timer that was NEVER SET, so `await` on one
+        # returns instantly and the scene fires at t=0. Wait on set-and-finished instead --
+        # but only when something in the mission actually sets this timer. If nothing does,
+        # 2.8 never fires the event either, so skip the scene rather than block the chain
+        # on a timer that is never coming.
+        name = n.get("name")
+        if name in em.timers_set:
+            return [f'    await is_timer_set_and_finished(0, "{name}")']
+        return _skip_unless(f'is_timer_set_and_finished(0, "{name}")', next_label)
     if tag == "if_object_property":
         b = _cond_bool(em, n)  # mapped props -> a live boolean; poll until it holds
         if b:
@@ -1291,7 +1302,12 @@ def _cond_bool(em: Emitter, n: XmlNode) -> str | None:
         o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
         return f"object_exists({o})" if tag == "if_exists" else f"not object_exists({o})"
     if tag == "if_timer_finished":
-        return f'is_timer_finished(0, "{n.get("name")}")'
+        # SET-and-finished, not just finished: is_timer_finished returns True for a timer
+        # that was NEVER SET ("nothing pending" reads as done). 2.8 does not fire an event
+        # on a timer that never started, so the plain form made every such guard true at
+        # t=0 -- four corpus missions ran their end-game loop in the first tick and called
+        # show_game_results seconds in.
+        return f'is_timer_set_and_finished(0, "{n.get("name")}")'
     if tag == "if_docked":
         em.addons.add("docking")
         ship = em._player_ref(n) or 'role("__player__")'

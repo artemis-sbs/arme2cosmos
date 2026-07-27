@@ -364,6 +364,7 @@ def build_player_respawn_routes(events: list, em: Emitter) -> list[str]:
 
 def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid") -> str:
     _prescan_named_objects(mission, em)
+    _prescan_timers(mission, em)
     em.emit_scan_roles = True  # recover set_ship_text scan_desc / hailtext (see below)
     _prescan_scan_hail(mission, em)
     label = _slug(mission.name)
@@ -812,6 +813,17 @@ def _side_value_of(n, em: Emitter) -> int:
         return int(float(raw))
     except (TypeError, ValueError):
         return _DEFAULT_PLAYER_SIDE
+
+
+def _prescan_timers(mission: Mission, em: Emitter) -> None:
+    """Which timers the mission actually starts.
+
+    ``is_timer_finished`` answers True for a timer that was never set, so a condition on a
+    timer nothing starts is true from t=0. Knowing which names are real lets the emitters
+    tell "waiting for a timer" apart from "waiting for a timer that is never coming".
+    """
+    em.timers_set = {n.get("name") for n in mission.all_nodes()
+                     if n.tag == "set_timer" and n.get("name")}
 
 
 def _prescan_named_objects(mission: Mission, em: Emitter) -> None:

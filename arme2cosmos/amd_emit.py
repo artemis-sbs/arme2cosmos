@@ -748,10 +748,11 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     """Build the full ``--target amd`` scaffold (files dict). Populates em.addons/notes."""
     from .convert import (_slug, _display_name, _prescan_named_objects,
                           build_script_py, build_story_json, build_description_yaml,
-                          build_notes, build_button_route, build_gm_tree_routes,
+                          build_notes, build_button_route, build_gm_tree_routes, _prescan_timers,
                           is_player_respawn_event, build_player_respawn_routes)
 
     _prescan_named_objects(mission, em)
+    _prescan_timers(mission, em)
     em.addons.add("quests")  # LM quest_driver reads the granted AMD
     # ...and the tab that DISPLAYS it. quest_driver only runs the tree; the quest log the
     # crew reads is `documents/quest_tab.mast` (gui_tab_add_top("quest"), shown on the
