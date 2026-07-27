@@ -749,7 +749,8 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     from .convert import (_slug, _display_name, _prescan_named_objects,
                           build_script_py, build_story_json, build_description_yaml,
                           build_notes, build_button_route, build_gm_tree_routes, _prescan_timers,
-                          is_player_respawn_event, build_player_respawn_routes)
+                          is_player_respawn_event, build_player_respawn_routes,
+                          redundant_gm_key_events, gm_key_label)
 
     _prescan_named_objects(mission, em)
     _prescan_timers(mission, em)
@@ -772,6 +773,7 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     # Partition comms/GM-button events out to //comms routes (reuse the MAST-target
     # builders) -- exactly as convert.build_story_mast does. Only the remaining "plain"
     # events become quests/beats, so button trees don't degrade into polling loops.
+    _dupe_gm_keys = redundant_gm_key_events(mission)
     comms_btn_events: dict[str, object] = {}
     gm_btn_events: dict[str, object] = {}
     respawn_player_events = []
@@ -795,7 +797,10 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
         elif gb is not None:
             gm_btn_events.setdefault(gb.get("text", ""), ev)
         elif gk is not None:
-            gm_btn_events.setdefault(f"Hotkeys/{gk.get('keyText', '?')}", ev)
+            # Same as the MAST target: skip a hotkey that only repeats a GM button.
+            if id(ev) in _dupe_gm_keys:
+                continue
+            gm_btn_events.setdefault(f"Hotkeys/{gm_key_label(gk.get('keyText'))}", ev)
         elif uses_gm_sel:
             gm_btn_events.setdefault(ev.name or "GM Action", ev)
         else:

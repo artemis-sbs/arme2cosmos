@@ -407,6 +407,53 @@ class ConvertTests(unittest.TestCase):
                         story.index('a2x_big_message("MISSION SUCCESS"'))
         self.assertNotIn("# when: fleet None", story)
 
+    def test_gm_hotkey_that_only_repeats_a_button_is_dropped(self):
+        # 2.8 advertises a button's shortcut in its own label ("... [N]") and then defines
+        # an if_gm_key event for that key. Cosmos has no GM hotkeys, so each key became a
+        # button in a Hotkeys submenu -- i.e. a second copy of a button the GM already has,
+        # labelled with nothing but the key. Drop it only when the BODY is identical: a key
+        # doing something different, or one no button advertises, is the only way to reach
+        # that action at all.
+        xml = os.path.join(self.tmp.name, "MISS_Keys.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Keys.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+    <set_gm_button text="Create/Nebulae [N]"/>
+  </start>
+  <event>
+    <if_gm_button text="Create/Nebulae [N]"/>
+    <create count="30" type="nebulas" nebType="1" use_gm_position="yes" radius="5000"/>
+  </event>
+  <event>
+    <if_gm_key keyText="N"/>
+    <create count="30" type="nebulas" nebType="1" use_gm_position="yes" radius="5000"/>
+  </event>
+  <event>
+    <if_gm_key keyText="M"/>
+    <create count="30" type="nebulas" nebType="2" use_gm_position="yes" radius="5000"/>
+  </event>
+  <event>
+    <if_gm_key keyText=" "/>
+    <set_variable name="reset_buttons" value="1"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # N duplicates its button exactly -> gone
+        self.assertNotIn('+ "N":', story)
+        # M is not advertised by any button -> kept
+        self.assertIn('+ "M":', story)
+        # an unprintable key gets a readable label rather than a blank button
+        self.assertIn('+ "Space":', story)
+        self.assertNotIn('+ " ":', story)
+        # the real button survives untouched
+        self.assertIn('+ "Nebulae [N]":', story)
+
     def test_gm_button_tree_splits_on_backslash_too(self):
         # 2.8 has no single separator convention for GM submenus: most missions write
         # "Create Enemy/Extras/Nebulae", some write "Delete\\Selected ship", and a mission

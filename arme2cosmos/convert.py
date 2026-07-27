@@ -432,6 +432,7 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     # signal-flag there can emit its signal too).
     # Comms/GM button-handler events become //comms buttons (GM ones gated to the GM
     # console), not linear-chain labels.
+    _dupe_gm_keys = redundant_gm_key_events(mission)
     comms_btn_events: dict[str, object] = {}
     gm_btn_events: dict[str, object] = {}
     respawn_player_events = []
@@ -457,8 +458,12 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
             gm_btn_events.setdefault(gb.get("text", ""), ev)
         elif gk is not None:
             # Cosmos has no GM hotkeys -> expose the 2.8 hotkey action as a GM comms button
-            # (grouped under a "Hotkeys" submenu), the closest supported GM trigger.
-            gm_btn_events.setdefault(f"Hotkeys/{gk.get('keyText', '?')}", ev)
+            # (grouped under a "Hotkeys" submenu), the closest supported GM trigger. Unless
+            # a real button already advertises that key and does the same thing, in which
+            # case the entry would just duplicate it under a one-letter label.
+            if id(ev) in _dupe_gm_keys:
+                continue
+            gm_btn_events.setdefault(f"Hotkeys/{gm_key_label(gk.get('keyText'))}", ev)
         elif uses_gm_sel:
             gm_btn_events.setdefault(ev.name or "GM Action", ev)
         else:
@@ -1002,6 +1007,56 @@ def _button_body(em: Emitter, ev, handler_tag: str) -> list[str]:
     if not any(ln.strip() and not ln.strip().startswith("#") for ln in body):
         body.append("        ~~ pass ~~")
     return body
+
+
+def _cmd_sig(ev) -> tuple:
+    """What an event's body DOES, as a comparable value (tag + attributes, in order)."""
+    return tuple((n.tag, tuple(sorted(n.attrib.items()))) for n in ev.commands)
+
+
+def gm_key_label(key: str) -> str:
+    """A 2.8 GM ``keyText`` as a readable button label.
+
+    A hotkey becomes an entry in the GM Hotkeys submenu, and Cosmos has no hotkeys -- so
+    the label is all the GM has to go on. A bare `" "` renders as a blank button; name the
+    unprintable ones instead.
+    """
+    k = (key or "").strip()
+    if not k:
+        return "Space" if key == " " else "?"
+    return k
+
+
+def redundant_gm_key_events(mission: Mission) -> set:
+    """ids of ``if_gm_key`` events that merely repeat a GM BUTTON.
+
+    2.8 missions advertise a button's shortcut in its own label -- ``Create Enemy/Extras/
+    Nebulae [N]`` -- and then define an ``if_gm_key`` event for that key doing the same
+    thing. Cosmos has no GM hotkeys, so the converter exposes each key as a button in a
+    Hotkeys submenu, which turned those into a second copy of a button the GM already has,
+    labelled with nothing but the key.
+
+    An event is dropped only when a button advertises the same key AND its body is
+    IDENTICAL. A key whose body differs is a different action that happens to share a
+    letter (MISS_Module_3_bases' ``N`` spawns a different nebula type from its button), and
+    a key no button advertises is the only way to reach that action at all (both missions
+    with hotkeys use an unadvertised spacebar to reset their button set).
+    """
+    by_key: dict[str, list] = {}
+    keys: list = []
+    for ev in mission.events:
+        for c in ev.conditions:
+            if c.tag == "if_gm_button":
+                for k in re.findall(r"\[([^\]]+)\]", c.get("text") or ""):
+                    by_key.setdefault(k.strip().upper(), []).append(ev)
+            elif c.tag == "if_gm_key":
+                keys.append((c.get("keyText"), ev))
+    out = set()
+    for key, ev in keys:
+        twins = by_key.get((key or "").strip().upper(), [])
+        if any(_cmd_sig(b) == _cmd_sig(ev) for b in twins):
+            out.add(id(ev))
+    return out
 
 
 def _gm_path(text: str) -> list[str]:
