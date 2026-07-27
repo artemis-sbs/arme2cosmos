@@ -117,9 +117,12 @@ def _player_fill_lines(em: Emitter, players: list, mission: Mission | None = Non
     """
     if len(players) >= len(_DEFAULT_PLAYER_LIST):
         return []
-    # The mission makes its own crew somewhere (an event, not <start>) -- leave it alone.
-    if not players and mission is not None and _mission_player_creates(mission):
-        return []
+    # NOTE: this used to bail when the mission created a player in an EVENT instead, on the
+    # grounds that it made its own crew. It does not: an event-time create PLACES an
+    # existing ship (2.8 has 8 fixed slots -- see Emitter.c_player), so bailing left such a
+    # mission with no ship at all, and nothing to pick at ship select.
+    # MISS_Medusa's_Maze is the case: its only player create is in one of eight
+    # randomly-chosen maze-entrance events.
     if players:
         last = players[-1]
         try:
@@ -202,9 +205,13 @@ def _player_route_lines(mission: Mission, em: Emitter) -> list[str]:
            "# this mission declares (the map task would run too late -- it loads after the",
            "# console menu). Player creates inside 2.8 EVENTS stay in their event.",
            "//shared/signal/create_player_ships"]
+    # Only here does a `create type="player"` really SPAWN. Everywhere else the ship
+    # already exists and the command places it -- see Emitter.c_player.
+    em.player_spawn_phase = True
     for n in players:
         out.append(f"    # {_xml_one(n)}")
         out.extend(em.emit_command(n))
+    em.player_spawn_phase = False
     out.extend(fill)
     # Safe to end the task: a //shared/signal route is dispatched on its own spawned task
     # (signal_register defaults is_jump, and emit_signal start_task()s it), so ->END stops

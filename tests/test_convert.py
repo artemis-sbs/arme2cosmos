@@ -773,10 +773,13 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(sorted(zs), [91000, 92000, 93000, 94000,
                                       95000, 96000, 97000, 98000])
 
-    def test_player_created_in_an_event_stays_in_the_event(self):
-        # Only <start> players are the starting roster. MISS_Medusa's_Maze spawns a player
-        # from an EVENT -- that is mid-mission gameplay and must not be hoisted to server
-        # start (nor must the roster fill kick in and add eight ships alongside it).
+    def test_player_created_in_an_event_places_the_existing_ship(self):
+        # 2.8 has exactly 8 player slots and the crew is already flying one, so a `create
+        # type="player"` in an EVENT places that ship -- it cannot make a 9th. Spawning
+        # there gave the mission a second, unmanned hull; and because the roster fill used
+        # to bail for such missions, one whose ONLY player create is in an event
+        # (MISS_Medusa's_Maze, eight random maze entrances) had no ship at all to pick at
+        # ship select.
         xml = os.path.join(self.tmp.name, "MISS_LatePlayer.xml")
         with open(xml, "w", encoding="utf-8") as f:
             f.write("""<?xml version="1.0" ?>
@@ -794,9 +797,14 @@ class ConvertTests(unittest.TestCase):
         d = convert_file(xml, self.out, target="mast")
         with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
             story = f.read()
-        self.assertNotIn("//shared/signal/create_player_ships", story)
-        self.assertEqual(story.count("a2x_create_player("), 1)
-        self.assertGreater(story.index("a2x_create_player("), story.index("@map/"))
+        # the roster still spawns at server start, so there is something to crew...
+        self.assertIn("//shared/signal/create_player_ships", story)
+        self.assertEqual(story.count("a2x_create_player("), 8)
+        self.assertLess(story.index("a2x_create_player("), story.index("@map/"))
+        # ...and the event PLACES slot 0 rather than spawning a ninth hull
+        self.assertIn('a2x_place_player(5, 0, 6, slot=0, name="Artemis", side="friendly")',
+                      story)
+        self.assertGreater(story.index("a2x_place_player("), story.index("@map/"))
 
     def test_sides_are_not_collapsed_onto_lm_keys(self):
         # 2.8 sideValue is a faction index, not a 3-valued enum: MISS_The_Arena puts

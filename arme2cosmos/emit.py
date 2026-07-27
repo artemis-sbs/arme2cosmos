@@ -223,6 +223,11 @@ class Emitter:
         # Timer names any set_timer in the mission actually starts. A condition naming a
         # timer NOTHING sets can never fire in 2.8, so waiting on it would hang the chain.
         self.timers_set: set[str] = set()
+        # True only while the <start> roster is being emitted into
+        # //shared/signal/create_player_ships. Everywhere else a `create
+        # type="player"` PLACES an existing ship (2.8 has 8 fixed slots), so
+        # c_player emits a2x_place_player instead of spawning a 9th hull.
+        self.player_spawn_phase = False
         # What a chained scene's if_variable becomes: id(condition node) -> "skip" | "wait".
         # Decided by convert.plan_chain_flag_gates, which can see the chain ORDER and who
         # sets each flag; an absent entry means it stays a comment.
@@ -382,9 +387,19 @@ class Emitter:
     def c_player(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
         self.addons.update({"consoles", "fleets"})
+        nm = _mast_str(n.get("name") or player_slot_name(n.get("player_slot", 0)))
+        if not self.player_spawn_phase:
+            # NOT the <start> roster: 2.8 has exactly 8 player slots and the crew is
+            # already flying one, so this command PLACES a ship rather than making a 9th.
+            # Spawning here gave the mission a second, unmanned hull -- and where the only
+            # player create is in an event (MISS_Medusa's_Maze rolls one of eight maze
+            # entrances) it also meant no ship existed at ship-select time.
+            slot = n.get("player_slot", 0)
+            side = self._side(n, _DEFAULT_PLAYER_SIDE)
+            args = [f"{x}, {y}, {z}", f"slot={slot}", f'name="{nm}"', f'side="{side}"']
+            return [f'    a2x_place_player({", ".join(args)})']
         self.note("player ship: a2x_create_player is a scaffold; prefer the consoles/"
                   "fleets addon (PLAYER_LIST + spawn_players) for real console wiring")
-        nm = _mast_str(n.get("name") or player_slot_name(n.get("player_slot", 0)))
         self.player_var = "player_ship"
         if n.get("name"):
             self._var_for(n.get("name"))  # also resolvable by name
