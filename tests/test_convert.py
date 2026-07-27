@@ -407,6 +407,50 @@ class ConvertTests(unittest.TestCase):
                         story.index('a2x_big_message("MISSION SUCCESS"'))
         self.assertNotIn("# when: fleet None", story)
 
+    def test_chained_scenes_gate_on_box_difficulty_and_fleet_counts(self):
+        # A chained scene whose conditions all degrade to comments has NO gate and runs the
+        # instant the chain reaches it. _cond_bool could already express these three; only
+        # the chain path was dropping them. Region triggers WAIT (same as the sphere pair);
+        # difficulty is settled before the mission starts, so it SKIPS.
+        xml = os.path.join(self.tmp.name, "MISS_Gates.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Gates.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+    <create type="enemy" x="9" y="0" z="9" name="KR1" sideValue="1"/>
+  </start>
+  <event name="Region">
+    <if_inside_box player_slot="0" leastX="10" leastZ="10" mostX="99" mostZ="99"/>
+    <log text="in the box"/>
+  </event>
+  <event name="Hard only">
+    <if_difficulty comparator="GREATER" value="5"/>
+    <log text="hard"/>
+  </event>
+  <event name="Thinned out">
+    <if_fleet_count comparator="LESS_EQUAL" value="2" sideValue="1"/>
+    <log text="thinned"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast", event_model="linear")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # region trigger -> a poll wait on the a2x_in_box helper that always existed
+        self.assertIn("a2x_in_box(", story)
+        self.assertRegex(story, r"---wait_box_\d+\n    await delay_sim\(0\.5\)\n"
+                                r"    jump wait_box_\d+ if not \(a2x_in_box\(")
+        # difficulty -> a skip to the next scene, never a wait
+        self.assertRegex(story, r"jump event_\d+ if not \(DIFFICULTY > 5\)")
+        # a non-zero fleet comparator has no awaitable, so it polls the count
+        self.assertRegex(story, r"jump wait_fleet_\d+ if not \(len\(to_object_list\("
+                                r'role\("enemy"\)\)\) <= 2\)')
+        # none of the three may be left as a bare comment
+        for dead in ("# guard: a2x_in_box", "# when: difficulty", "# when: fleet"):
+            self.assertNotIn(dead, story)
+
     def test_chained_exists_guard_skips_the_scene_not_the_mission(self):
         # An if_exists/if_not_exists in a CHAINED scene used to emit `->END if ...`, which
         # ends the whole map task -- so one unmet condition silently threw away every

@@ -218,7 +218,7 @@ class Emitter:
         # text (the AMD target stores it as an inventory value + a gated //comms Hail route).
         self.hails: dict[str, str] = {}
         self.hail_done: set[str] = set()  # objects already given their stored hail value
-        self.wait_prop_n = 0  # unique-label counter for if_object_property poll waits
+        self.wait_prop_n = 0  # unique-label counter for chained-scene poll waits
         # 2.8 object names referenced by a later command/condition (not the create) -- a
         # monster with a referenced name needs the capturable path, not a prefab_spawn.
         self.referenced_names: set[str] = set()
@@ -1110,14 +1110,45 @@ def _fleet_count_role(n: XmlNode) -> str | None:
     return _side_key(sv) if sv else None
 
 
+def _wait_until(em: Emitter, expr: str, stem: str) -> list[str]:
+    """Hold the chain here until *expr* is true (a half-second poll).
+
+    The shape a chained scene needs for a condition that BECOMES true -- a ship reaching a
+    box, a fleet thinning out. ``await`` covers the handful of conditions with a real
+    awaitable behind them; everything else polls. Labels are numbered off one counter so an
+    event carrying several waits does not collide with itself.
+    """
+    em.wait_prop_n += 1
+    lbl = f"wait_{stem}_{em.wait_prop_n}"
+    return [f"---{lbl}", "    await delay_sim(0.5)", f"    jump {lbl} if not ({expr})"]
+
+
+def _skip_unless(expr: str, next_label: str | None) -> list[str]:
+    """Skip this scene when *expr* is false. For a condition that is already settled when
+    the chain arrives (difficulty, an object's existence) -- waiting on one of those would
+    hang the chain on something that is never going to change."""
+    return [f"    {f'jump {next_label}' if next_label else '->END'} if not ({expr})"]
+
+
 def emit_condition(em: Emitter, n: XmlNode, idx: int = 0,
                    next_label: str | None = None) -> list[str]:
     """Translate an event condition into a wait/guard line (best-effort).
 
-    ``next_label`` is the scene AFTER this one in the chain, and is what a failed guard
-    skips to. Without it a guard has nowhere to go but ``->END``, which ends the whole map
-    task -- so one unmet condition threw away every remaining scene. Pass None only for the
-    last scene in the chain, where ending really is what comes next.
+    Three shapes, and which one a condition gets is the whole game:
+
+    * ``await`` / poll (:func:`_wait_until`) -- the condition BECOMES true, so the scene
+      waits for it (distance, timers, docking, a fleet being wiped out).
+    * skip (:func:`_skip_unless`) -- the condition is already settled on arrival, so a
+      false one means this scene is not for this playthrough (difficulty; whether an
+      object exists).
+    * a comment -- nothing maps yet. **This is the dangerous one**: a scene whose every
+      condition is a comment has no gate left and runs the moment the chain reaches it.
+      That is how MISS_TrialsOfDeneb01 announced MISSION SUCCESS at t=0.
+
+    ``next_label`` is the scene AFTER this one, and is what a skip jumps to. Without it a
+    guard has nowhere to go but ``->END``, which ends the whole map task -- so one unmet
+    condition threw away every remaining scene. Pass None only for the last scene in the
+    chain, where ending really is what comes next.
     """
     tag = n.tag
     if tag == "if_fleet_count":
@@ -1129,8 +1160,21 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0,
         who = _fleet_count_role(n)
         if who and (n.get("comparator", "") in ("<=", "LESS_EQUAL")) and n.get("value") in ("0", "0.0"):
             return [f'    await destroyed_all(role("{who}"))']
+        # Any other comparator ("more than 3 left", "exactly 1") has no awaitable behind
+        # it, but it is still a count the mission is waiting on -- poll it rather than
+        # leaving the scene with no gate.
+        b = _cond_bool(em, n)
+        if b:
+            return _wait_until(em, b, "fleet")
         return [f"    # when: fleet {n.get('fleetnumber')} side {n.get('sideValue')} "
                 f"count {n.get('comparator','')} {n.get('value','')}"]
+    if tag == "if_difficulty":
+        # Settled before the mission starts and never changes, so this selects whether the
+        # scene belongs in this playthrough at all -- skip, never wait.
+        b = _cond_bool(em, n)
+        if b:
+            return _skip_unless(b, next_label)
+        return [f"    # when: difficulty {n.get('comparator','')} {n.get('value','')}"]
     if tag == "if_docked":
         who = _resolve_obj(em, n.get("name"), n.get("player_slot"))
         # which ship docks: the player (player_slot/name=player) -> player_var
@@ -1156,10 +1200,14 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0,
         fn = "distance_point_less" if tag == "if_inside_sphere" else "distance_point_greater"
         return [f"    await {fn}({o}, a2x_pos({cx}, {cy}, {cz}), {r})"]
     if tag in ("if_inside_box", "if_outside_box"):
-        o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
-        inside = "True" if tag == "if_inside_box" else "False"
-        return [f'    # guard: a2x_in_box({o}, {n.get("leastX","0")}, {n.get("leastZ","0")}, '
-                f'{n.get("mostX","0")}, {n.get("mostZ","0")}, inside={inside})']
+        # Same job as the sphere pair above (a ship reaching a region), so the same shape:
+        # wait for it. a2x_in_box has always existed and _cond_bool has always emitted it --
+        # only the chain path was leaving a comment here, and a region trigger is usually
+        # the ONLY condition on its scene, so that scene fired on arrival instead.
+        b = _cond_bool(em, n)
+        if b:
+            return _wait_until(em, b, "box")
+        return [f'    # when: {tag} {n.get("name") or n.get("player_slot")}']
     if tag in ("if_exists", "if_not_exists"):
         # A one-shot test, not something to wait on: 2.8 checks it the moment the event is
         # considered. Failing it SKIPS this scene -- it does not end the mission.
@@ -1182,9 +1230,7 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0,
     if tag == "if_object_property":
         b = _cond_bool(em, n)  # mapped props -> a live boolean; poll until it holds
         if b:
-            em.wait_prop_n += 1  # unique per condition (an event can have several)
-            lbl = f"wait_prop_{em.wait_prop_n}"
-            return [f"---{lbl}", "    await delay_sim(0.5)", f"    jump {lbl} if not ({b})"]
+            return _wait_until(em, b, "prop")
     return [f"    # when: {_xml_repr(n)}"]
 
 
