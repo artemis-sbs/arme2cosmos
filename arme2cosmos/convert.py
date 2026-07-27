@@ -868,10 +868,25 @@ def _truthy(v: str) -> bool:
 
 
 def _respawn_name(ev) -> str | None:
-    """A single ``if_not_exists NAME`` event -> NAME (a respawn-on-destroy candidate)."""
-    if len(ev.conditions) == 1 and ev.conditions[0].tag == "if_not_exists":
-        return ev.conditions[0].get("name")
-    return None
+    """A single ``if_not_exists NAME`` event whose body RE-CREATES NAME -> NAME.
+
+    The body check is the whole point. "When NAME is gone" is not automatically "respawn
+    NAME": 2.8 uses it just as often for "when NAME is gone, react" -- announce a loss, end
+    the mission. Those bodies create nothing.
+
+    That matters because a respawn candidate is emitted as a ``=== respawn_j`` label that is
+    ALSO scheduled once at map start (the initial spawn, before the //damage/destroy route
+    takes over re-spawning). Handing that treatment to a reaction event runs the reaction at
+    t=0: MISS_ShipyardEscape's "End Game 2" is ``if_not_exists Artemis -> end_mission``, and
+    it called show_game_results in the first tick, before the crew had done anything.
+    """
+    if len(ev.conditions) != 1 or ev.conditions[0].tag != "if_not_exists":
+        return None
+    name = ev.conditions[0].get("name")
+    if not name:
+        return None
+    creates = {n.get("name") for n in ev.commands if n.tag == "create" and n.get("name")}
+    return name if name in creates else None
 
 
 def _is_dock(ev) -> bool:

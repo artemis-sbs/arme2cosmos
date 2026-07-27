@@ -407,6 +407,46 @@ class ConvertTests(unittest.TestCase):
                         story.index('a2x_big_message("MISSION SUCCESS"'))
         self.assertNotIn("# when: fleet None", story)
 
+    def test_object_gone_reaction_is_not_treated_as_a_respawn(self):
+        # A respawn candidate is emitted as `=== respawn_j` AND scheduled once at map start
+        # (the initial spawn, before //damage/destroy takes over). That is only right if the
+        # body actually re-creates the object. 2.8 uses "when X is gone" just as often to
+        # REACT -- announce a loss, end the mission -- and giving those the respawn
+        # treatment ran the reaction at t=0. MISS_ShipyardEscape called show_game_results in
+        # the first tick that way.
+        xml = os.path.join(self.tmp.name, "MISS_Gone.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Gone.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+    <create type="station" x="5" y="0" z="5" name="DS1" sideValue="2"/>
+    <create type="enemy" x="9" y="0" z="9" name="KR1" sideValue="1"/>
+  </start>
+  <event name="Rebuild the enemy">
+    <if_not_exists name="KR1"/>
+    <create type="enemy" x="9" y="0" z="9" name="KR1" sideValue="1"/>
+  </event>
+  <event name="Base lost">
+    <if_not_exists name="DS1"/>
+    <end_mission/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # the real respawn keeps its route + initial schedule
+        self.assertIn("=== respawn_0", story)
+        self.assertIn("task_schedule(respawn_0)", story)
+        self.assertIn('//damage/destroy if has_role(DESTROYED_ID, "respawn_KR1")', story)
+        # the reaction must NOT become a scheduled respawn -- that fires end_mission at t=0
+        self.assertEqual(story.count("=== respawn_"), 1)
+        self.assertNotIn("task_schedule(respawn_1)", story)
+        # it stays a guarded polling loop, so it only fires once DS1 really is gone
+        self.assertIn("not object_exists(obj_ds1)", story)
+
     def test_unset_timer_does_not_fire_at_t0(self):
         # is_timer_finished answers True for a timer that was NEVER SET ("nothing pending"
         # reads as done), so a guard on one is true from the first tick. Four corpus
