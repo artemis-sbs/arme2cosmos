@@ -407,6 +407,40 @@ class ConvertTests(unittest.TestCase):
                         story.index('a2x_big_message("MISSION SUCCESS"'))
         self.assertNotIn("# when: fleet None", story)
 
+    def test_random_set_variable_actually_rolls(self):
+        # 2.8 rolls a range in place (randomIntLow/High) instead of carrying a `value`.
+        # Reading only `value` gave those a flat 0 -- not a near-miss: every event gated on
+        # the rolled result then tested a number the flag could never hold, so none could
+        # fire. MISS_Medusa's_Maze picks its start corner that way and got no player ship at
+        # all. 2734 int rolls + 66 float rolls across the corpus.
+        xml = os.path.join(self.tmp.name, "MISS_Roll.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Roll.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+    <set_variable name="StartPlayer" randomIntLow="1" randomIntHigh="8" integer="yes"/>
+    <set_variable name="drift" randomFloatLow="0.5" randomFloatHigh="2.5"/>
+  </start>
+  <event name="Corner 3">
+    <if_variable name="StartPlayer" comparator="EQUALS" value="3.0"/>
+    <log text="corner three"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast", event_model="linear")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        self.assertIn("shared StartPlayer = random.randint(1, 8)", story)
+        self.assertIn("shared drift = random.uniform(0.5, 2.5)", story)
+        # the forward declaration (`default shared ... = 0`) is fine and expected; what must
+        # not survive is the ASSIGNMENT flattening the roll to a constant
+        self.assertNotIn("\n    shared StartPlayer = 0\n", story)
+        # a gate on the ROLLED flag must wait for the roll, not be skipped as unproduced:
+        # the roll has no single value, so it can produce any number in its range
+        self.assertRegex(story, r"jump wait_flag_\d+ if not \(StartPlayer == 3\.0\)")
+
     def test_object_gone_reaction_is_not_treated_as_a_respawn(self):
         # A respawn candidate is emitted as `=== respawn_j` AND scheduled once at map start
         # (the initial spawn, before //damage/destroy takes over). That is only right if the

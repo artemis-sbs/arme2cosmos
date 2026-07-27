@@ -37,7 +37,7 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `destroy_near` | **DONE** | center form -> `a2x_destroy_near`; the "near a named object" form -> `a2x_destroy_near_object` (uses the object's runtime position) |
 | `direct` | **DONE** | `target_pos` / `target` |
 | `add_ai` / `clear_ai` | **PARTIAL** | mapped 2.8 brains -> `a2x_add_ai`; unmapped types emit a no-op call + note |
-| `set_variable` / `set_timer` / `set_difficulty_level` | **DONE** | direct |
+| `set_variable` / `set_timer` / `set_difficulty_level` | **DONE** | direct. `set_variable` also takes a RANGE instead of a value (`randomIntLow`/`randomIntHigh`, `randomFloatLow`/`randomFloatHigh`) -> `random.randint` / `random.uniform`, seeded once by `settings_seed_apply` so `--seed` reproduces a run. Reading only `value` flattened these to `0`, so every event gated on the rolled result tested a number the flag could never hold: 2734 int + 66 float rolls across the corpus, 2736 of them in The Arena |
 | `log` / `play_sound_now` | **DONE** | `log()` / `sbs.play_audio_file` |
 | `big_message` / `incoming_comms_text` / `incoming_message` / `warning_popup_message` | **DONE** | info-panel card (`comms_info_card`) / audio |
 | `set_player_grid_damage` | **DONE** | `grid_damage_system(ship, sbs.SHPSYS.*)` |

@@ -473,7 +473,7 @@ class Emitter:
         # shared so concurrent independent-event tasks can read the flag
         raw = n.get("name")
         name = _pyname(raw)
-        out = [f"    shared {name} = {_value(n.get('value', '0'))}"]
+        out = [f"    shared {name} = {_set_variable_value(n)}"]
         # if a //signal route listens on this flag, fire the signal too (push)
         if name in self.signal_flags:
             out.append(f'    signal_emit("a2x_flag_{name}")')
@@ -987,6 +987,30 @@ def _mast_str(s: str) -> str:
 _CMP_OP = {"=": "==", "EQUALS": "==", "!=": "!=", "NOT": "!=",
            "<": "<", "LESS": "<", ">": ">", "GREATER": ">",
            "<=": "<=", "LESS_EQUAL": "<=", ">=": ">=", "GREATER_EQUAL": ">="}
+
+
+def _set_variable_value(n: XmlNode) -> str:
+    """The value a 2.8 ``set_variable`` assigns -- a literal, or a RANDOM ROLL.
+
+    2.8 rolls a range in place: ``randomIntLow``/``randomIntHigh`` (and the float pair)
+    instead of ``value``. Reading only ``value`` gave those a flat ``0``, which is not a
+    near-miss -- every event gated on the rolled result then tested against a number the
+    flag could never hold, so none of them could fire. MISS_Medusa's_Maze picks its start
+    corner that way (``StartPlayer`` = 1..8, one create-player event per value), so the
+    mission got no player ship at all. 2734 int rolls and 66 float rolls across the corpus,
+    2736 of them in MISS_The_Arena.
+
+    ``random`` is a MAST global (LegendaryMissions uses ``random.choice`` in its own maps),
+    and the whole mission is seeded once by ``settings_seed_apply``, so these stay
+    reproducible under a fixed ``--seed``.
+    """
+    lo, hi = n.get("randomIntLow"), n.get("randomIntHigh")
+    if lo is not None and hi is not None:
+        return f"random.randint({_value(lo)}, {_value(hi)})"
+    lo, hi = n.get("randomFloatLow"), n.get("randomFloatHigh")
+    if lo is not None and hi is not None:
+        return f"random.uniform({_value(lo)}, {_value(hi)})"
+    return _value(n.get("value", "0"))
 
 
 def var_cond_bool(n: XmlNode) -> str:

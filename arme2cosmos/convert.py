@@ -214,6 +214,12 @@ def _player_route_lines(mission: Mission, em: Emitter) -> list[str]:
     return out
 
 
+def _is_random_set(n) -> bool:
+    """Does this ``set_variable`` roll a range rather than assign a literal?"""
+    return ((n.get("randomIntLow") is not None and n.get("randomIntHigh") is not None)
+            or (n.get("randomFloatLow") is not None and n.get("randomFloatHigh") is not None))
+
+
 def plan_chain_flag_gates(seq_events: list, mission: Mission, em: Emitter) -> None:
     """Decide what each chained scene's ``if_variable`` becomes: a skip, a wait, or nothing.
 
@@ -242,9 +248,16 @@ def plan_chain_flag_gates(seq_events: list, mission: Mission, em: Emitter) -> No
     # OUTSIDE the chain does (start block, polling loop, route -- all live from t=0).
     setters: dict[tuple, set] = {}
     off_chain: set = set()
+    # A flag assigned a RANDOM ROLL has no single value to key on -- it can come out as any
+    # number in its range, so it produces every value a gate might ask for. Tracked by NAME
+    # and treated as a producer for all of them, or a gate on the rolled result would look
+    # unproduced and be skipped (MISS_Medusa's_Maze picks its start corner exactly this way).
+    rolled: set = set()
     for n in mission.start:
         if n.tag == "set_variable" and n.get("name"):
             off_chain.add((_pyname(n.get("name")), _num_key(n.get("value"))))
+            if _is_random_set(n):
+                rolled.add(_pyname(n.get("name")))
     for ev in mission.events:
         pos = chain_pos.get(id(ev))
         for n in ev.commands:
@@ -253,6 +266,8 @@ def plan_chain_flag_gates(seq_events: list, mission: Mission, em: Emitter) -> No
             key = (_pyname(n.get("name")), _num_key(n.get("value")))
             if pos is None:
                 off_chain.add(key)
+                if _is_random_set(n):
+                    rolled.add(key[0])
             else:
                 setters.setdefault(key, set()).add(pos)
     late = 0
@@ -271,7 +286,7 @@ def plan_chain_flag_gates(seq_events: list, mission: Mission, em: Emitter) -> No
             if vkey is None:
                 continue   # an expression, not a value we can reason about -> comment
             before = {p for p in setters.get((name, vkey), set()) if p < i}
-            if (name, vkey) in off_chain or before:
+            if (name, vkey) in off_chain or before or name in rolled:
                 em.chain_flag_gate[id(c)] = "wait"
             else:
                 em.chain_flag_gate[id(c)] = "skip"
