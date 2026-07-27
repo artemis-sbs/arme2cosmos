@@ -1095,6 +1095,21 @@ def _resolve_obj(em: Emitter, name: str | None, slot: str | None) -> str:
     return em.symbols.get(name) or f'a2x_named("{_mast_str(name)}")'
 
 
+def _fleet_count_role(n: XmlNode) -> str | None:
+    """The role ``if_fleet_count`` counts: a 2.8 ``fleetnumber``, else every object on its
+    ``sideValue``. None when it names neither (nothing to count).
+
+    The side form is how a 2.8 mission asks "are they all dead yet?" -- it is the standard
+    mission-success test -- and the side key is the role a2x_create_* already tags each
+    spawn with, so counting it needs no new bookkeeping.
+    """
+    fl = (n.get("fleetnumber") or "").strip()
+    if fl:
+        return f"fleet_{fl}"
+    sv = (n.get("sideValue") or "").strip()
+    return _side_key(sv) if sv else None
+
+
 def emit_condition(em: Emitter, n: XmlNode, idx: int = 0,
                    next_label: str | None = None) -> list[str]:
     """Translate an event condition into a wait/guard line (best-effort).
@@ -1106,10 +1121,16 @@ def emit_condition(em: Emitter, n: XmlNode, idx: int = 0,
     """
     tag = n.tag
     if tag == "if_fleet_count":
-        fl = n.get("fleetnumber")
-        if fl and (n.get("comparator", "") in ("<=", "LESS_EQUAL")) and n.get("value") in ("0", "0.0"):
-            return [f'    await destroyed_all(role("fleet_{fl}"))']
-        return [f"    # when: fleet {fl} count {n.get('comparator','')} {n.get('value','')}"]
+        # 2.8 counts EITHER a named fleet or -- with no fleetnumber -- every ship on a
+        # sideValue ("are all the enemies dead?", the usual mission-success test). Only the
+        # fleet form was mapped, so the side form degraded to a comment: a scene whose one
+        # real gate was "all enemies destroyed" then ran the instant the chain reached it.
+        # MISS_TrialsOfDeneb01 declared MISSION SUCCESS at t=0 that way.
+        who = _fleet_count_role(n)
+        if who and (n.get("comparator", "") in ("<=", "LESS_EQUAL")) and n.get("value") in ("0", "0.0"):
+            return [f'    await destroyed_all(role("{who}"))']
+        return [f"    # when: fleet {n.get('fleetnumber')} side {n.get('sideValue')} "
+                f"count {n.get('comparator','')} {n.get('value','')}"]
     if tag == "if_docked":
         who = _resolve_obj(em, n.get("name"), n.get("player_slot"))
         # which ship docks: the player (player_slot/name=player) -> player_var
@@ -1191,11 +1212,11 @@ def _cond_bool(em: Emitter, n: XmlNode) -> str | None:
         op = _CMP_OP.get((n.get("comparator", "") or "").strip().upper(), "==")
         return f"DIFFICULTY {op} {_value(n.get('value', '0'))}"
     if tag == "if_fleet_count":
-        fl = n.get("fleetnumber")
-        if not fl:
+        who = _fleet_count_role(n)   # a named fleet, or every ship on a sideValue
+        if not who:
             return None
         op = _CMP_OP.get((n.get("comparator", "") or "").strip().upper(), "==")
-        return f'len(to_object_list(role("fleet_{fl}"))) {op} {_value(n.get("value", "0"))}'
+        return f'len(to_object_list(role("{who}"))) {op} {_value(n.get("value", "0"))}'
     if tag == "if_distance":
         a = _resolve_obj(em, n.get("name1"), n.get("player_slot1"))
         val = _value(n.get("value", "0"))

@@ -377,6 +377,36 @@ class ConvertTests(unittest.TestCase):
         with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
             return d, f.read()
 
+    def test_fleet_count_by_side_is_a_real_gate(self):
+        # 2.8 if_fleet_count counts EITHER a named fleet or, with no fleetnumber, every ship
+        # on a sideValue -- "are all the enemies dead?", the standard mission-success test.
+        # Only the fleet form was mapped, so the side form became a comment and the scene it
+        # gated ran immediately: MISS_TrialsOfDeneb01 declared MISSION SUCCESS at t=0.
+        xml = os.path.join(self.tmp.name, "MISS_Wipe.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<?xml version="1.0" ?>
+<mission_data version="2.8">
+  <mission_description>Wipe.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="1" y="0" z="2" sideValue="2"/>
+    <create type="enemy" x="9" y="0" z="9" name="KR1" sideValue="1"/>
+  </start>
+  <event name="Victory">
+    <if_fleet_count comparator="LESS_EQUAL" value="0" sideValue="1"/>
+    <big_message title="MISSION SUCCESS" subtitle1="You are victorious"/>
+  </event>
+</mission_data>
+""")
+        d = convert_file(xml, self.out, target="mast", event_model="linear")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        # sideValue 1 -> the "enemy" side key, which is the role a2x_create_enemy tags with
+        self.assertIn('await destroyed_all(role("enemy"))', story)
+        # the win card must sit BEHIND that wait, not run at t=0
+        self.assertLess(story.index('await destroyed_all(role("enemy"))'),
+                        story.index('a2x_big_message("MISSION SUCCESS"'))
+        self.assertNotIn("# when: fleet None", story)
+
     def test_chained_exists_guard_skips_the_scene_not_the_mission(self):
         # An if_exists/if_not_exists in a CHAINED scene used to emit `->END if ...`, which
         # ends the whole map task -- so one unmet condition silently threw away every
