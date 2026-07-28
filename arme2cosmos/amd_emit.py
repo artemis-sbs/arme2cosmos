@@ -75,6 +75,7 @@ class Quest:
         self.win: str | bool | None = None   # prose reason, True (bare flag), or None
         self.lose: str | bool | None = None
         self.desc = ""
+        self.show = "always"     # `Show:` - when this is LISTED in the quest log
         self.todos: list[str] = []
         # The RAW 2.8 event name. `title` gets rewritten by _quest_title for readability,
         # but the original is what carries the author's grouping ("Ramscoop Begin 1").
@@ -101,6 +102,8 @@ class Quest:
             out.append(f"Fail on all dead: {self.fail_on_all_dead}")
         if self.fail_on_signal:
             out.append(f"Fail on signal: {self.fail_on_signal}")
+        if self.show and self.show != "always":
+            out.append(f"Show: {self.show}")
         for label, val in (("Win", self.win), ("Lose", self.lose)):
             if val is True:
                 out.append(f"{label}: true")
@@ -415,6 +418,7 @@ class AmdBuilder:
         # AFTER the reveal graph (it fills phase_routes, whose reveal lists must be
         # re-keyed) and AFTER kill aggregation (so the synthetic fleet parent is grouped
         # like any other quest).
+        self._assign_show()          # decide what is LISTED before anything is nested
         self._group_name_families(used_ids)
         # if nothing produced a real objective, still give the log a root quest
         if not any(q.goal or q.when or q.fail_on_all_dead or q.fail_on_signal
@@ -485,6 +489,43 @@ class AmdBuilder:
             q.parent = pkey
             q.required = True
         self.quests.insert(0, parent)
+
+    # 2.8 commands that SAY something to the crew - the mark of a story beat rather
+    # than pure bookkeeping.
+    NARRATIVE_TAGS = {"incoming_comms_text", "big_message", "warning_popup_message"}
+
+    def _assign_show(self) -> None:
+        """Decide WHEN each quest is listed in the log (`Show:`).
+
+        A converted 2.8 event is a timeline step whether or not a player can act on it,
+        and the quest system is right to model them alike - but the LOG is a different
+        surface. HamakSector listed 48 rows for 5 real objectives, so the crew read the
+        whole story up front.
+
+        Three cases, all derivable here:
+          * a real trigger verb (destroy / reach / dock / scan ...) -> `always`.
+            Something the crew can DO: a to-do, listed from the start.
+          * the body says something to the crew -> `when done`. A story beat: it runs
+            unseen and appears once it RESOLVES, where it reads as history. Nearly all
+            beats qualify (hamaksector 59/70, cruiser 284/284), so the history is real
+            content rather than noise.
+          * the body only sets flags / moves objects / arms timers -> `never`. Pure
+            machinery ("Play SPFX"), which should drive its event invisibly.
+        """
+        VERBS = ("destroy", "kill", "collect", "recover", "gather", "scan", "survey",
+                 "dock", "reach", "travel")
+        says = {}
+        for key, body, _sig in self.completion_bodies:
+            says[key] = says.get(key, False) or any(n.tag in self.NARRATIVE_TAGS for n in body)
+        for q in self.quests:
+            if q.goal and any(q.goal.lower().startswith(v) for v in VERBS):
+                q.show = "always"          # a player objective
+            elif q.win or q.lose or q.fail_on_all_dead or q.fail_on_signal:
+                q.show = "always"          # end-game / protect objectives stay visible
+            elif says.get(q.key):
+                q.show = "when done"       # a story beat -> history
+            else:
+                q.show = "never"           # bookkeeping
 
     # -- arcs (name families -> a container quest with its members nested under it) ----
     ARC_MIN = 3          # a family of 1-2 is not a group; wrapping it groups nothing
