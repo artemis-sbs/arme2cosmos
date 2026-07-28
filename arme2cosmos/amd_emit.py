@@ -585,6 +585,13 @@ class AmdBuilder:
             # Visible as soon as ANY member is - an all-secret family stays hidden, so a
             # container cannot spoil a chapter by naming it before anything has happened.
             arc.state = "secret" if all(m.state == "secret" for m in members) else "active"
+            # A container is a HEADING, not a job: `with children` gives it a row only
+            # while something under it is listed, so a family whose beats are all still
+            # running (`Show: when done`) does not sit there naming a thread that has
+            # not happened yet. Declared rather than left to the renderer to infer,
+            # because a hand-authored multi-step JOB also has children and must stay
+            # visible - it is the thing the player accepts.
+            arc.show = "with children"
             arc.desc = f"{title} events."
             arc.todos.append("name this group (auto-named from the 2.8 event names)")
             arcs.append(arc)
