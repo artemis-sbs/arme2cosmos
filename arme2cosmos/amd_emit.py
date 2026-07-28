@@ -75,15 +75,21 @@ class Quest:
         self.win: str | bool | None = None   # prose reason, True (bare flag), or None
         self.lose: str | bool | None = None
         self.desc = ""
-        self.show = "always"     # `Show:` - when this is LISTED in the quest log
+        self.show = "always"     # when this is LISTED in the quest log
+        # The screenplay word for what this record IS. `Beat` / `Arc` already imply
+        # their own `Show:`, so the noun replaces the field for the common cases and
+        # the file reads as a script rather than a config.
+        self.kind: str | None = None
         self.todos: list[str] = []
         # The RAW 2.8 event name. `title` gets rewritten by _quest_title for readability,
         # but the original is what carries the author's grouping ("Ramscoop Begin 1").
         self.source_name = title
 
     def render(self) -> str:
-        out = [f"# [{_amd_text(self.title)}]({self.key})", "---",
-               f"Scope: {self.scope}", f"State: {self.state}"]
+        out = [f"# [{_amd_text(self.title)}]({self.key})", "---"]
+        if self.kind:
+            out.append(self.kind)          # the kind line is the FIRST line of a fence
+        out += [f"Scope: {self.scope}", f"State: {self.state}"]
         if self.goal:
             out.append(f"Done when: {self.goal}")
         if self.when:
@@ -102,7 +108,8 @@ class Quest:
             out.append(f"Fail on all dead: {self.fail_on_all_dead}")
         if self.fail_on_signal:
             out.append(f"Fail on signal: {self.fail_on_signal}")
-        if self.show and self.show != "always":
+        # ...and only spell `Show:` out when the noun does not already say it.
+        if self.show and self.show != "always" and _SHOW_BY_KIND.get(self.kind) != self.show:
             out.append(f"Show: {self.show}")
         for label, val in (("Win", self.win), ("Lose", self.lose)):
             if val is True:
@@ -251,6 +258,10 @@ def _outcome_prose(ev: Event) -> str:
             parts = [n.get("title"), n.get("subtitle1"), n.get("subtitle2")]
             return _amd_text(" ".join(p for p in parts if p)) or True  # type: ignore[return-value]
     return True  # type: ignore[return-value]
+
+
+# Which `Show:` each screenplay noun already implies (mirrors amd_schema._KIND_SHOW).
+_SHOW_BY_KIND = {"Beat": "when done", "Arc": "with children"}
 
 
 class AmdBuilder:
@@ -524,6 +535,7 @@ class AmdBuilder:
                 q.show = "always"          # end-game / protect objectives stay visible
             elif says.get(q.key):
                 q.show = "when done"       # a story beat -> history
+                q.kind = "Beat"
             else:
                 q.show = "never"           # bookkeeping
 
@@ -592,6 +604,7 @@ class AmdBuilder:
             # because a hand-authored multi-step JOB also has children and must stay
             # visible - it is the thing the player accepts.
             arc.show = "with children"
+            arc.kind = "Arc"
             arc.desc = f"{title} events."
             arc.todos.append("name this group (auto-named from the 2.8 event names)")
             arcs.append(arc)
