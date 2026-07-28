@@ -76,6 +76,9 @@ class Quest:
         self.lose: str | bool | None = None
         self.desc = ""
         self.todos: list[str] = []
+        # The RAW 2.8 event name. `title` gets rewritten by _quest_title for readability,
+        # but the original is what carries the author's grouping ("Ramscoop Begin 1").
+        self.source_name = title
 
     def render(self) -> str:
         out = [f"# [{_amd_text(self.title)}]({self.key})", "---",
@@ -409,9 +412,10 @@ class AmdBuilder:
             (self.quests.append(q) if q is not None else self.beats.append(ev))
         self._wire_reveal_graph()  # defer phase-gated watchers until their phase is reached
         self._aggregate_kills(used_ids)  # roll per-ship kills under one Parent quest
-        # AFTER the reveal graph (it fills phase_routes) and AFTER kill aggregation
-        # (so a synthetic fleet parent can itself be nested under an arc).
-        self._group_phase_arcs(used_ids)
+        # AFTER the reveal graph (it fills phase_routes, whose reveal lists must be
+        # re-keyed) and AFTER kill aggregation (so the synthetic fleet parent is grouped
+        # like any other quest).
+        self._group_name_families(used_ids)
         # if nothing produced a real objective, still give the log a root quest
         if not any(q.goal or q.when or q.fail_on_all_dead or q.fail_on_signal
                    or q.win or q.lose or q.complete_after for q in self.quests):
@@ -482,65 +486,69 @@ class AmdBuilder:
             q.required = True
         self.quests.insert(0, parent)
 
-    # -- arcs (phase gates -> a container quest with its steps nested under it) --------
-    ARC_MIN = 3      # a gate revealing 1-2 quests is not an arc; wrapping it groups nothing
+    # -- arcs (name families -> a container quest with its members nested under it) ----
+    ARC_MIN = 3          # a family of 1-2 is not a group; wrapping it groups nothing
+    CATCHALL = "Other"   # everything that belongs to no family
 
-    def _group_phase_arcs(self, used_ids: set) -> None:
-        """Nest the quests a phase gate reveals under a container ARC, so the Quests tab
+    def _group_name_families(self, used_ids: set) -> None:
+        """Nest quests under a container ARC per 2.8 event-name FAMILY, so the Quests tab
         reads as a tree instead of one flat list the crew can read ahead.
 
-        A 2.8 ``if_variable flag == value`` gate already IS the grouping - the converter
-        computed it into ``phase_routes`` and then threw the structure away by emitting a
-        flat ``quest_reveal([...])``. Here it becomes a real container instead.
+        The 2.8 author did the grouping already, in the event names: HamakSector has 17
+        "Ramscoop *" events in ordered runs ("Begin 1/2/3", "25%/50%/75%", "Installed
+        1/2/3"), 19 "Tachyon *", 18 "Haynes *". Across the corpus that is 282 families
+        covering a median 78% of a mission's events - by far the broadest signal, and the
+        only one that reaches the quests a player can actually SEE.
 
-        The quest system does the rest: nested ``arc/step`` keys render indented in the
-        log, a SECRET row hides its whole subtree (so an unreached arc hides its chapter),
-        and ``quest_reeval_tree_parent`` completes the arc when every step is done. The
-        container therefore has NO trigger of its own - completion is driven only by its
-        children, which is the documented "pure container" shape.
+        Chapter comments were measured and rejected: exactly ONE mission of 29 uses them
+        (HamakSector's "Chapter 1, wherein..."). Phase flags were tried first and are the
+        wrong axis - they only ever group quests the gate was ALREADY keeping secret, so
+        the visible list did not change at all. Phase gates still drive REVEAL; grouping
+        and reveal are orthogonal (where a quest sits vs when it appears).
 
-        Only for gates revealing >= ARC_MIN quests: 138 of the corpus's 165 gates reveal
-        exactly ONE, and wrapping those would add a tree level that groups nothing (Dawn
-        Patrol alone would gain 43 one-item arcs).
+        Families are NOT nested under chapters even where both exist: 5 of HamakSector's
+        55 families straddle a chapter boundary (Ramscoop runs through 1 and 3), and
+        splitting a family in two reads worse than having no outer level.
 
-        NOT numbered. Order is not knowable statically and many flags run in PARALLEL
-        (cruiser_tournament has eight concurrent ``Bonus_N`` gates, dawn_patrol one
-        ``*_Destination`` per ship), so "Chapter 1..N" would assert a sequence that does
-        not exist. The humanised flag is used instead - accurate for every gate, and
-        genuinely good where the 2.8 author named it well (``chapter`` -> "Chapter 3").
+        The quest system does the rest, unchanged: nested `arc/step` keys render indented,
+        a SECRET row hides its whole subtree, and quest_reeval_tree_parent completes the
+        arc when every member is done. Containers carry no trigger of their own.
         """
-        # Which flags are a real SEQUENCE? Counted over the whole mission - `chapter`
-        # takes 1/2/3 in HamakSector though only one value became a phase gate, and that
-        # is what makes "Chapter 3" the right title rather than "Chapter".
-        flag_values: dict[str, set] = {}
-        for n in self.mission.all_nodes():
-            # set_variable ONLY. An if_variable comparison includes latch checks
-            # (`== 0`, `!= v`), which would make every one-value flag look like a
-            # sequence and stick a meaningless number on its title.
-            if n.tag == "set_variable" and n.get("name"):
-                flag_values.setdefault(n.get("name"), set()).add((n.get("value") or "").strip())
-        seq = {f for f, vs in flag_values.items() if len({v for v in vs if v}) > 1}
+        fams: dict[str, list] = {}
+        for q in self.quests:
+            word = (q.source_name or "").split()
+            fams.setdefault(word[0] if word else "", []).append(q)
+
+        groups: list[tuple[str, str, list]] = []      # (key-stem, title, members)
+        loose: list = []
+        for prefix, members in fams.items():
+            if prefix and len(members) >= self.ARC_MIN:
+                groups.append((_pyname(prefix), prefix, members))
+            else:
+                loose.extend(members)
+        # Everything with no family of its own goes in one catch-all rather than sitting
+        # loose beside the groups, so the log has no ragged top level.
+        if len(loose) >= self.ARC_MIN:
+            groups.append((_pyname(self.CATCHALL), self.CATCHALL, loose))
+        if not groups:
+            return
 
         rekey: dict[str, str] = {}
         arcs: list[Quest] = []
-        arc_of: dict[tuple, str] = {}
-        for (flag, vkey), (vraw, items) in self.phase_routes.items():
-            if len(items) < self.ARC_MIN:
-                continue
-            akey = _pyname(f"phase_{flag}_{vkey}")     # greppable back to its a2x_phase_* gate
+        for stem, title, members in groups:
+            akey = f"fam_{stem}"
             while akey in used_ids:
                 akey += "_x"
             used_ids.add(akey)
-            arc = Quest(akey, _arc_title(flag, vraw, flag in seq))
-            arc.state = "secret"                        # revealed with its steps by the gate
-            arc.desc = f"Story arc reached when {flag} becomes {vraw}."
-            arc.todos.append("name this arc (auto-named from the 2.8 flag)")
+            arc = Quest(akey, title)
+            # Visible as soon as ANY member is - an all-secret family stays hidden, so a
+            # container cannot spoil a chapter by naming it before anything has happened.
+            arc.state = "secret" if all(m.state == "secret" for m in members) else "active"
+            arc.desc = f"{title} events."
+            arc.todos.append("name this group (auto-named from the 2.8 event names)")
             arcs.append(arc)
-            arc_of[(flag, vkey)] = akey
-            for qkey, _label in items:
-                rekey[qkey] = f"{akey}/{qkey}"
-        if not rekey:
-            return
+            for m in members:
+                rekey[m.key] = f"{akey}/{m.key}"
 
         # Re-point EVERY reference: QUEST_ID is the full '/'-path, so a stale flat key
         # silently matches nothing (the same class of bug as listening on the wrong signal).
@@ -554,16 +562,10 @@ class AmdBuilder:
         self.completion_bodies = [(rekey.get(k, k), body, sig)
                                   for k, body, sig in self.completion_bodies]
         for key, (vraw, items) in list(self.phase_routes.items()):
-            moved = [(rekey.get(k, k), lbl) for k, lbl in items]
-            # Reveal the ARC too, not just its steps. A SECRET row hides its whole
-            # subtree, so an unrevealed container would keep its chapter hidden for the
-            # entire mission - the failure would look exactly like the steps not firing.
-            if key in arc_of:
-                moved.insert(0, (arc_of[key], None))
-            self.phase_routes[key] = (vraw, moved)
+            self.phase_routes[key] = (vraw, [(rekey.get(k, k), lbl) for k, lbl in items])
         self.quests = arcs + self.quests
-        self.em.note(f"AMD: grouped {len(rekey)} quest(s) into {len(arcs)} story arc(s) from "
-                     f"the 2.8 phase flags - rename them in story.amd (each carries a TODO).")
+        self.em.note(f"AMD: grouped {len(rekey)} quest(s) into {len(arcs)} group(s) from the "
+                     f"2.8 event names - rename them in story.amd (each carries a TODO).")
 
     # -- objective quests (flag-guarded trigger events) --------------------------------
     def _dropped_guards(self, ev: Event, terminal: set) -> list:
