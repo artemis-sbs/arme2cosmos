@@ -571,7 +571,8 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
 
     # --- docked -> //signal/ship_docked (LM docking emits this on station dock) ---
     for ev in dock_events:
-        lines.append(f"//signal/ship_docked   # {ev.name} (was if_docked)")
+        # SHARED: a 2.8 event body is server work, and runs once.
+        lines.append(f"//shared/signal/ship_docked   # {ev.name} (was if_docked)")
         for n in ev.commands:
             lines.append(f"    # {_xml_one(n)}")
             lines.extend(em.emit_command(n))
@@ -582,7 +583,8 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     for ev in flag_events:
         c = _flag_signal(ev)
         name, val = _pyname(c.get("name")), _value(c.get("value", "0"))
-        lines.append(f"//signal/a2x_flag_{name}   # {ev.name} (was if_variable {name})")
+        # SHARED: a 2.8 event body is server work, and runs once.
+        lines.append(f"//shared/signal/a2x_flag_{name}   # {ev.name} (was if_variable {name})")
         lines.append(f"    ->END if not ({name} == {val})")  # signal fires on any set; guard value
         for n in ev.commands:
             lines.append(f"    # {_xml_one(n)}")

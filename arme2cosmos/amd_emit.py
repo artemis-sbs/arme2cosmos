@@ -65,7 +65,7 @@ class Quest:
         self.phase_gates: list = []         # [(flag, vkey, vraw)] surviving phase-gate flags
         self.parent: str | None = None      # `Parent: <key>` (mission-tree aggregation)
         self.required = False               # `Required: true` (parent needs this child)
-        self.body_signal = "quest_completed"  # completion-body route: _completed / _failed
+        self.body_signal = "quest_succeeded"  # completion-body route: driver ANNOUNCEMENT
         self.protect_name: str | None = None  # friendly protect target -> "Protect <name>"
         self.critical = False
         self.fail_on_all_dead: str | None = None
@@ -298,7 +298,7 @@ class AmdBuilder:
 
     def _extract_timed_chains(self, used_ids: set) -> set:
         """Emit EVERY linear chain of >=2 timed narrative beats as a reveal chain of
-        `Complete after:` quests (bodies on //signal/quest_completed). Returns the set of
+        `Complete after:` quests (bodies on //shared/signal/quest_succeeded). Returns the set of
         consumed event ids. A beat = an event gated on exactly ``if_timer_finished T`` +
         ``if_variable F == n`` that advances ``F`` (2.8's timed-sequence idiom); each
         beat's wait is the timer the previous step reset (the ``<start>`` timer first)."""
@@ -340,7 +340,7 @@ class AmdBuilder:
                         if not (n.tag == "set_timer" and n.get("name") == info["T"])
                         and not (n.tag == "set_variable" and n.get("name") == info["F"])]
                 if body:
-                    self.completion_bodies.append((keys[i], body, "quest_completed"))
+                    self.completion_bodies.append((keys[i], body, "quest_succeeded"))
                 self.quests.append(q)
                 prev_secs = info["set_timer_secs"] or prev_secs
             consumed |= {id(ev) for ev, _ in chain}
@@ -621,7 +621,7 @@ class AmdBuilder:
         # does NOT emit quest_activated, so an activation-body would never fire.
         q.complete_after = "5 seconds"
         if ev.commands:
-            self.completion_bodies.append((key, list(ev.commands), "quest_completed"))
+            self.completion_bodies.append((key, list(ev.commands), "quest_succeeded"))
         return q
 
     def _fill_objective(self, q: Quest, ev: Event, terminal: set) -> None:
@@ -648,7 +648,7 @@ class AmdBuilder:
                     # destroying a friendly/neutral object is a LOSS/penalty, not a goal:
                     # a PROTECT objective that FAILS when it dies (body on quest_failed).
                     q.fail_on_all_dead = role
-                    q.body_signal = "quest_failed"
+                    q.body_signal = "quest_failed_done"
                     q.protect_name = name
                 else:
                     q.goal = f"destroy 1 {role}"
@@ -681,7 +681,7 @@ class AmdBuilder:
                             None)
             if friendly is not None:
                 q.fail_on_signal = sig
-                q.body_signal = "quest_failed"
+                q.body_signal = "quest_failed_done"
                 q.protect_name = friendly.get("name")
             else:
                 q.when = f"signal {sig}"
@@ -965,7 +965,10 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     for (flag, vkey), (vraw, items) in builder.phase_routes.items():
         sig = _phase_sig_name(flag, vkey)
         keys = [k for k, _ in items]
-        L.append(f"//signal/{sig}   # phase {flag} == {vraw} reached -> reveal + start")
+        # SHARED: this reveals quests and SCHEDULES WATCHER TASKS. Per-console it would
+        # spawn one gate watcher per connected console, each firing the same quest
+        # signal - duplicate advancement, not just duplicate display.
+        L.append(f"//shared/signal/{sig}   # phase {flag} == {vraw} reached -> reveal + start")
         L.append(f"    quest_reveal(SHARED, {keys!r})")
         for _k, gl in items:
             if gl:                       # a watcher objective; story beats reveal only
@@ -988,10 +991,20 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
         L.append("    ->END")
         L.append("")
 
-    # event bodies: run when the quest resolves. quest_completed for objectives/beats;
-    # quest_failed for a protect objective (the body is the 2.8 penalty payload).
+    # Event bodies: run when the quest resolves.
+    #
+    # ANNOUNCEMENTS, not requests. The driver EMITS quest_succeeded / quest_failed_done
+    # once it has finished processing a resolution. quest_completed / quest_failed are
+    # the opposite direction - signals the driver LISTENS for, so a mission can ASK for a
+    # transition. Listening on a request waits for something nothing sends, which is what
+    # silently killed every narrated beat in every conversion.
+    # SHARED, not per-console. A 2.8 event body is server work - it messages the crew,
+    # sets variables, moves objects, arms timers - and every message verb it emits
+    # addresses its own audience. On a plain //signal it runs once per connected console
+    # PLUS the server, so a five-console bridge saw each hail five times and every side
+    # effect happened five times over.
     for key, body, sig in builder.completion_bodies:
-        L.append(f'//signal/{sig} if QUEST_ID == "{key}"   # event body')
+        L.append(f'//shared/signal/{sig} if QUEST_ID == "{key}"   # event body')
         for n in body:
             L.append(f"    # {_xml_one(n)}")
             L.extend(em.emit_command(n))

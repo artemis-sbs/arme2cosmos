@@ -536,7 +536,20 @@ class Emitter:
         frm = _mast_str(n.get("from", ""))
         body = _mast_str(n.text or "")  # ^ line-breaks preserved; a2x_clean converts them
         # 2.8 `from` is just the sender label (the comms title), not an object reference.
-        return [f'    a2x_incoming_comms_text("{body}", from_name="{frm}")']
+        args = [f'"{body}"', f'from_name="{frm}"']
+        # `type` (ALERT / FRIEND / STATION / ENEMY / STATUS) is the KIND of message, so it
+        # becomes the comms message's title bar. It does NOT go on the lower-third name
+        # plate - that names the speaker.
+        kind = (n.get("type") or "").strip()
+        if kind:
+            args.append(f'title="{_mast_str(kind)}"')
+        # `sideValue` is who the hail is ADDRESSED to. Dropping it sent every hail to
+        # every player ship; 3247 of the corpus's 4318 tags carry one. 2.8 spells it both
+        # ways, so accept either.
+        side = (n.get("sideValue") or n.get("SideValue") or "").strip()
+        if side:
+            args.append(f"side={side}")
+        return [f'    a2x_incoming_comms_text({", ".join(args)})']
 
     def _gm_selected(self, n: XmlNode) -> str | None:
         """The GM's selected object, for a 2.8 command carrying ``use_gm_selection``.

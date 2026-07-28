@@ -1141,7 +1141,9 @@ class ConvertAddAiTests(unittest.TestCase):
         sh = open(os.path.join(dh, "story.mast"), encoding="utf-8").read()
         sl = open(os.path.join(dl, "story.mast"), encoding="utf-8").read()
         # hybrid: a //signal route guarded by the flag value (no polling task)
-        self.assertIn("//signal/a2x_flag_go", sh)
+        # SHARED: a 2.8 event body is server work and must run ONCE, not once per
+        # connected console (that duplicated every message and side effect).
+        self.assertIn("//shared/signal/a2x_flag_go", sh)
         self.assertIn("->END if not (go == 1)", sh)
         # linear: forced into the sequential chain, no route
         self.assertNotIn("//signal", sl)
@@ -1256,7 +1258,8 @@ class ConvertFlagSignalTests(unittest.TestCase):
         self.assertIn("shared alarm = 1", story)
         self.assertIn('signal_emit("a2x_flag_alarm")', story)
         # the waiting event is now an event-driven route guarded by the value
-        self.assertIn("//signal/a2x_flag_alarm", story)
+        # SHARED - see the note in test_event_model_hybrid_vs_linear.
+        self.assertIn("//shared/signal/a2x_flag_alarm", story)
         self.assertIn("->END if not (alarm == 1)", story)
         # not a polling loop
         self.assertNotIn("=== ind_event_", story)
