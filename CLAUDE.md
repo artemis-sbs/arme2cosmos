@@ -5,6 +5,29 @@ A command-line tool that converts **Artemis 2.8 XML missions** (`MISS_*.xml`) in
 a `story.mast` (+ `script.py`, `story.json`, `description.yaml`, `__lib__.json`,
 `MIGRATION_NOTES.md`) for a human to finish.
 
+## Where this lives
+
+Its own git repo (`github.com/artemis-sbs/arme2cosmos`), checked out **inside the Cosmos
+missions tree** at `Cosmos-1-3-0/data/missions/arme2cosmos` — moved there from `f:/a/`
+on 2026-07-27. It is not a mission: no `description.yaml` / `story.json` / `__lib__.json`,
+so the mission picker and `sbs.pyz` both skip it, exactly as they skip `sbs_utils` and
+`sbs_cli` alongside it.
+
+That makes the things it is tested against **siblings**, so the relative paths in this
+file work as written (they did not from the old location):
+
+| sibling | what it is |
+|---|---|
+| `../sbs_utils` | the `a2x` layer the generated MAST calls |
+| `../LegendaryMissions` | the LM addons the generated `story.json` lists |
+| `../A2xTestRange` | the conformance mission |
+
+Being inside the tree changes nothing about **the one rule below** — the tool still
+imports nothing from Cosmos.
+
+The 2.8 sources it converts are at `F:/a/a28/dat/Missions/` (capital **M**), and the
+converted corpus lives at `F:/a/Cosmos-a2x-test/data/missions_amd`.
+
 ## The one rule that shapes everything
 
 **This tool has ZERO runtime dependency on `sbs_utils` or Cosmos — stdlib only.**

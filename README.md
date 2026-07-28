@@ -214,7 +214,8 @@ objectives, and story flow are in place; you polish the few details the notes ca
 ### How the port is verified
 
 Two layers back the conversion (both need a Cosmos checkout with `sbs_utils` +
-LegendaryMissions):
+LegendaryMissions - this repo is checked out inside one, at
+`Cosmos-1-3-0/data/missions/arme2cosmos`, so both are siblings):
 
 - **Conformance** — [**A2xTestRange**](https://github.com/artemis-sbs/A2xTestRange), a
   standalone sister test mission (its own repo), has ~28 maps that assert the *runtime
