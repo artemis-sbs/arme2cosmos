@@ -87,29 +87,43 @@ class Quest:
 
     def render(self) -> str:
         out = [f"# [{_amd_text(self.title)}]({self.key})", "---"]
+        implied = _IMPLIED_BY_KIND.get(self.kind or "", {})
         if self.kind:
             out.append(self.kind)          # the kind line is the FIRST line of a fence
-        out += [f"Scope: {self.scope}", f"State: {self.state}"]
+        # Write a field only where the record DIFFERS from what its noun already says.
+        if implied.get("scope") != self.scope:
+            out.append(f"Scope: {self.scope}")
+        # WHEN IT ARMS, in one field. `At start: hidden/running` said the same thing in a
+        # second vocabulary; the trigger it used to compete with now lives in `Done when:`
+        # where the driver was reading it all along.
+        at_start = _AT_START.get(self.state, self.state)
+        if implied.get("state") != at_start:
+            out.append("Starts when: %s" % _ARMS.get(at_start, at_start))
         if self.goal:
             out.append(f"Done when: {self.goal}")
         if self.when:
-            out.append(f"Starts when: {self.when}")
+            # The gate that advances this record. It went in `Starts when:` and was read
+            # as an advancement trigger anyway - the two labels wrote the SAME key. Say
+            # the one that is true. (A record carrying both keeps the gate in
+            # `Starts when:`, which is exactly where a real start trigger would go.)
+            out.append(f"{'Starts when' if self.goal else 'Done when'}: {self.when}")
         if self.complete_after:
-            out.append(f"Complete after: {self.complete_after}")
+            out.append(f"Done when: {self.complete_after}")   # a time is a trigger
         if self.reveal:
             out.append(f"Then: reveal {self.reveal}")
         if self.parent:
-            out.append(f"Parent: {self.parent}")
+            out.append(f"Part of: {self.parent}")
         if self.required:
             out.append("Required: true")
         if self.critical:
-            out.append("Critical: true")
+            out.append("Fatal: true")
+        # One grammar for all three life-cycle questions.
         if self.fail_on_all_dead:
-            out.append(f"Fail on all dead: {self.fail_on_all_dead}")
+            out.append(f"Fails when: all dead {self.fail_on_all_dead}")
         if self.fail_on_signal:
-            out.append(f"Fail on signal: {self.fail_on_signal}")
+            out.append(f"Fails when: signal {self.fail_on_signal}")
         # ...and only spell `Show:` out when the noun does not already say it.
-        if self.show and self.show != "always" and _SHOW_BY_KIND.get(self.kind) != self.show:
+        if self.show and self.show != "always" and implied.get("show") != self.show:
             out.append(f"Show: {self.show}")
         for label, val in (("Win", self.win), ("Lose", self.lose)):
             if val is True:
@@ -260,8 +274,22 @@ def _outcome_prose(ev: Event) -> str:
     return True  # type: ignore[return-value]
 
 
-# Which `Show:` each screenplay noun already implies (mirrors amd_schema._KIND_SHOW).
-_SHOW_BY_KIND = {"Beat": "when done", "Arc": "with children"}
+# What each screenplay noun already implies (mirrors amd_schema._KIND_DEFAULTS). A
+# record that says `Beat` is the whole crew's and already running, so writing those
+# again is ceremony - it was over half of every field line the corpus emitted.
+# `At start:` in the author's words - the machine words (active/secret/idle) are still
+# accepted by the reader, but nothing needs to WRITE them any more.
+_AT_START = {"active": "running", "secret": "hidden", "idle": "offered"}
+
+# ...and how each of those is SAID as an arming trigger.
+_ARMS = {"running": "at once", "hidden": "revealed", "offered": "accepted"}
+
+_IMPLIED_BY_KIND = {
+    "Objective": {"scope": "shared", "state": "running"},
+    "Beat": {"show": "when done", "scope": "shared", "state": "running"},
+    "Cue":  {"show": "never",     "scope": "shared", "state": "running"},
+    "Arc":  {"show": "with children", "scope": "shared", "state": "running"},
+}
 
 
 class AmdBuilder:
@@ -531,13 +559,16 @@ class AmdBuilder:
         for q in self.quests:
             if q.goal and any(q.goal.lower().startswith(v) for v in VERBS):
                 q.show = "always"          # a player objective
+                q.kind = "Objective"       # ...the crew's, and live from the start
             elif q.win or q.lose or q.fail_on_all_dead or q.fail_on_signal:
                 q.show = "always"          # end-game / protect objectives stay visible
+                q.kind = "Objective"
             elif says.get(q.key):
                 q.show = "when done"       # a story beat -> history
                 q.kind = "Beat"
             else:
                 q.show = "never"           # bookkeeping
+                q.kind = "Cue"             # a stage direction: it happens, unseen
 
     # -- arcs (name families -> a container quest with its members nested under it) ----
     ARC_MIN = 3          # a family of 1-2 is not a group; wrapping it groups nothing
