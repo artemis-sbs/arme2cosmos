@@ -16,6 +16,8 @@ semantics: an ambiguous end-game event is emitted with a ``// TODO win or lose?`
 
 from __future__ import annotations
 
+import re
+
 from .emit import (Emitter, emit_condition, _cond_bool, _pyname, _mast_str, _value,
                    _num_key, _phase_sig_name, _SIDE, _is_less, to_ascii)
 from .model import Event, Mission, XmlNode
@@ -126,6 +128,28 @@ def _amd_text(s: str) -> str:
     s = to_ascii(s).replace("^", " ").replace("\r", " ").replace("\n", " ")
     s = s.replace("[", "(").replace("]", ")")  # keep link syntax unambiguous
     return " ".join(s.split()).strip()
+
+
+def _arc_title(flag: str, vraw: str, is_sequence: bool = False) -> str:
+    """A 2.8 phase flag -> a readable arc title.
+
+    Humanising the flag is accurate for every gate and often genuinely good, because 2.8
+    authors named these things: `chapter` -> "Chapter 3", `Hostage_Mission` -> "Hostage
+    Mission 5", `Decision` -> "Decision", `Bonus_3` -> "Bonus 3".
+
+    The VALUE is appended only when `is_sequence` - the flag takes more than one value
+    somewhere in the MISSION, so the number means "which one". A flag used at a single
+    value is the arc's whole identity and reads better without a 2.8 state number stuck
+    on the end ("Decision", not "Decision 2").
+    """
+    words = " ".join(w for w in re.split(r"[_\s]+", str(flag).strip()) if w)
+    title = " ".join(w if w.isupper() else w.capitalize() for w in words.split())
+    v = str(vraw).strip()
+    if v.endswith(".0"):
+        v = v[:-2]
+    if not (is_sequence and v) or title.rstrip().endswith(v):
+        return title
+    return f"{title} {v}"
 
 
 # --- fleet / object helpers -----------------------------------------------------------
@@ -385,6 +409,9 @@ class AmdBuilder:
             (self.quests.append(q) if q is not None else self.beats.append(ev))
         self._wire_reveal_graph()  # defer phase-gated watchers until their phase is reached
         self._aggregate_kills(used_ids)  # roll per-ship kills under one Parent quest
+        # AFTER the reveal graph (it fills phase_routes) and AFTER kill aggregation
+        # (so a synthetic fleet parent can itself be nested under an arc).
+        self._group_phase_arcs(used_ids)
         # if nothing produced a real objective, still give the log a root quest
         if not any(q.goal or q.when or q.fail_on_all_dead or q.fail_on_signal
                    or q.win or q.lose or q.complete_after for q in self.quests):
@@ -454,6 +481,89 @@ class AmdBuilder:
             q.parent = pkey
             q.required = True
         self.quests.insert(0, parent)
+
+    # -- arcs (phase gates -> a container quest with its steps nested under it) --------
+    ARC_MIN = 3      # a gate revealing 1-2 quests is not an arc; wrapping it groups nothing
+
+    def _group_phase_arcs(self, used_ids: set) -> None:
+        """Nest the quests a phase gate reveals under a container ARC, so the Quests tab
+        reads as a tree instead of one flat list the crew can read ahead.
+
+        A 2.8 ``if_variable flag == value`` gate already IS the grouping - the converter
+        computed it into ``phase_routes`` and then threw the structure away by emitting a
+        flat ``quest_reveal([...])``. Here it becomes a real container instead.
+
+        The quest system does the rest: nested ``arc/step`` keys render indented in the
+        log, a SECRET row hides its whole subtree (so an unreached arc hides its chapter),
+        and ``quest_reeval_tree_parent`` completes the arc when every step is done. The
+        container therefore has NO trigger of its own - completion is driven only by its
+        children, which is the documented "pure container" shape.
+
+        Only for gates revealing >= ARC_MIN quests: 138 of the corpus's 165 gates reveal
+        exactly ONE, and wrapping those would add a tree level that groups nothing (Dawn
+        Patrol alone would gain 43 one-item arcs).
+
+        NOT numbered. Order is not knowable statically and many flags run in PARALLEL
+        (cruiser_tournament has eight concurrent ``Bonus_N`` gates, dawn_patrol one
+        ``*_Destination`` per ship), so "Chapter 1..N" would assert a sequence that does
+        not exist. The humanised flag is used instead - accurate for every gate, and
+        genuinely good where the 2.8 author named it well (``chapter`` -> "Chapter 3").
+        """
+        # Which flags are a real SEQUENCE? Counted over the whole mission - `chapter`
+        # takes 1/2/3 in HamakSector though only one value became a phase gate, and that
+        # is what makes "Chapter 3" the right title rather than "Chapter".
+        flag_values: dict[str, set] = {}
+        for n in self.mission.all_nodes():
+            # set_variable ONLY. An if_variable comparison includes latch checks
+            # (`== 0`, `!= v`), which would make every one-value flag look like a
+            # sequence and stick a meaningless number on its title.
+            if n.tag == "set_variable" and n.get("name"):
+                flag_values.setdefault(n.get("name"), set()).add((n.get("value") or "").strip())
+        seq = {f for f, vs in flag_values.items() if len({v for v in vs if v}) > 1}
+
+        rekey: dict[str, str] = {}
+        arcs: list[Quest] = []
+        arc_of: dict[tuple, str] = {}
+        for (flag, vkey), (vraw, items) in self.phase_routes.items():
+            if len(items) < self.ARC_MIN:
+                continue
+            akey = _pyname(f"phase_{flag}_{vkey}")     # greppable back to its a2x_phase_* gate
+            while akey in used_ids:
+                akey += "_x"
+            used_ids.add(akey)
+            arc = Quest(akey, _arc_title(flag, vraw, flag in seq))
+            arc.state = "secret"                        # revealed with its steps by the gate
+            arc.desc = f"Story arc reached when {flag} becomes {vraw}."
+            arc.todos.append("name this arc (auto-named from the 2.8 flag)")
+            arcs.append(arc)
+            arc_of[(flag, vkey)] = akey
+            for qkey, _label in items:
+                rekey[qkey] = f"{akey}/{qkey}"
+        if not rekey:
+            return
+
+        # Re-point EVERY reference: QUEST_ID is the full '/'-path, so a stale flat key
+        # silently matches nothing (the same class of bug as listening on the wrong signal).
+        for q in self.quests:
+            if q.key in rekey:
+                q.key = rekey[q.key]
+            if q.reveal in rekey:
+                q.reveal = rekey[q.reveal]
+            if q.parent in rekey:
+                q.parent = rekey[q.parent]
+        self.completion_bodies = [(rekey.get(k, k), body, sig)
+                                  for k, body, sig in self.completion_bodies]
+        for key, (vraw, items) in list(self.phase_routes.items()):
+            moved = [(rekey.get(k, k), lbl) for k, lbl in items]
+            # Reveal the ARC too, not just its steps. A SECRET row hides its whole
+            # subtree, so an unrevealed container would keep its chapter hidden for the
+            # entire mission - the failure would look exactly like the steps not firing.
+            if key in arc_of:
+                moved.insert(0, (arc_of[key], None))
+            self.phase_routes[key] = (vraw, moved)
+        self.quests = arcs + self.quests
+        self.em.note(f"AMD: grouped {len(rekey)} quest(s) into {len(arcs)} story arc(s) from "
+                     f"the 2.8 phase flags - rename them in story.amd (each carries a TODO).")
 
     # -- objective quests (flag-guarded trigger events) --------------------------------
     def _dropped_guards(self, ev: Event, terminal: set) -> list:
