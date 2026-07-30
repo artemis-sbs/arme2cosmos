@@ -12,7 +12,7 @@ import re
 
 from .emit import (Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _value,
                    _side_key, _DEFAULT_PLAYER_SIDE, _AI_OVERRIDES_DEFAULT,
-                   player_slot_name, _num_key, to_ascii)
+                   player_slot_name, _slot_int, _num_key, to_ascii)
 from .model import Mission
 from .parser import parse_file
 
@@ -137,6 +137,12 @@ def _player_fill_lines(em: Emitter, players: list, mission: Mission | None = Non
     # unnamed create -- otherwise the fill happily adds a second "Artemis".
     taken = {(n.get("name") or player_slot_name(n.get("player_slot", 0))).strip().lower()
              for n in players}
+    # The mission's own creates own their 2.8 slots, so the fill takes the ones LEFT. Slot
+    # is the roster index, which is also what player_slot_name maps, so slot N always means
+    # the same ship. Skipping used slots keeps the fill from claiming a slot the mission
+    # already positioned -- with slots now being identity, a collision would mean the fill
+    # silently resolved to the mission's ship instead of adding one.
+    used_slots = {_slot_int(n.get("player_slot", 0)) for n in players}
     side = _side_key(em.player_side if em.player_side is not None else _DEFAULT_PLAYER_SIDE)
     # The mission's own ships are kept; if it made none, Artemis alone is kept so the
     # mission is playable. Everything past that is a spare, marked at CREATION so
@@ -152,15 +158,15 @@ def _player_fill_lines(em: Emitter, players: list, mission: Mission | None = Non
            "    # mission's OWN player side -- PLAYER_CREATE_DEFAULT would use \"tsn\", a side",
            "    # this mission never declares, so its diplomacy would be empty."]
     i = len(players)
-    for spec in _DEFAULT_PLAYER_LIST:
-        if spec["name"].strip().lower() in taken:
+    for slot, spec in enumerate(_DEFAULT_PLAYER_LIST):
+        if slot in used_slots or spec["name"].strip().lower() in taken:
             continue
         if i >= len(_DEFAULT_PLAYER_LIST):
             break
         z = _on_map(bz + step * (i - len(players) + 1))
         roles = side if i < keep else f"{side}, {_SPARE_PLAYER_ROLE}"
         out.append(f'    a2x_create_player({_on_map(bx):g}, {by:g}, {z:g}, "{spec["ship"]}", '
-                   f'name="{spec["name"]}", side="{roles}")')
+                   f'name="{spec["name"]}", side="{roles}", slot={slot})')
         i += 1
     return out
 

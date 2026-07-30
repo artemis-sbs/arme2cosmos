@@ -1,4 +1,5 @@
 """Tests for the convert (scaffold) stage."""
+import re
 import os
 import tempfile
 import unittest
@@ -152,6 +153,16 @@ class ConvertTests(unittest.TestCase):
         for nm in ("Artemis", "Intrepid", "Diana"):
             self.assertIn(f'name="{nm}"', story)
         self.assertNotIn('side="tsn"', story)
+        # Every player create carries its 2.8 slot, which makes it idempotent: these run
+        # from //shared/signal/create_player_ships, and `shared` guarantees server-once
+        # per EMIT, not one emit -- a second emit used to duplicate the whole roster.
+        self.assertEqual(story.count("a2x_create_player("),
+                         len(re.findall(r"a2x_create_player\([^\n]*\bslot=\d+", story)),
+                         "every a2x_create_player must carry slot=")
+        # ...and the 8 slots are 0-7 exactly once each, so no two ships claim one slot
+        # (a collision would silently resolve to the other ship instead of creating).
+        slots = sorted(int(s) for s in re.findall(r"a2x_create_player\([^\n]*\bslot=(\d+)", story))
+        self.assertEqual(slots, list(range(8)))
         # Tagged in game_started so LM's crew-select / loadout machinery sees them. NOT
         # via spawn_players, which repositions ships near a friendly station and would
         # throw away the 2.8 spawn coordinates the mission actually specified.

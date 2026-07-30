@@ -176,6 +176,14 @@ def player_slot_name(slot):
         return _PLAYER_SLOT_NAMES[int(float(slot))]
     except (TypeError, ValueError, IndexError):
         return _PLAYER_SLOT_NAMES[0]
+
+
+def _slot_int(slot):
+    """A 2.8 ``player_slot`` as a plain int, defaulting to 0 like player_slot_name."""
+    try:
+        return int(float(slot))
+    except (TypeError, ValueError):
+        return 0
 _MONSTER_ART = "monster_charbdis"
 
 
@@ -431,8 +439,15 @@ class Emitter:
         # From here on `player_ship` holds a real id, so later references can use the
         # variable; anything emitted ABOVE this line resolved the slot at runtime.
         self.player_emitted = True
+        # Carry the 2.8 player_slot through. It makes the create IDEMPOTENT (the ship is
+        # made only if that slot is empty), which matters because these creates run from
+        # a //shared/signal/create_player_ships route: server-once per EMIT says nothing
+        # about how often the signal is emitted, and a second emit used to duplicate the
+        # whole roster. It also lets a2x_player_ship(slot) resolve by identity instead of
+        # by position in an unordered set.
+        slot = _slot_int(n.get("player_slot", 0))
         return [f'    shared player_ship = a2x_create_player({x}, {y}, {z}, "{_PLAYER_ART}", '
-                f'name="{nm}", side="{side}")']
+                f'name="{nm}", side="{side}", slot={slot})']
 
     def c_generic(self, n: XmlNode) -> list[str]:
         x, y, z = self._xyz(n)
