@@ -86,7 +86,15 @@ class Quest:
         self.source_name = title
 
     def render(self) -> str:
-        out = [f"# [{_amd_text(self.title)}]({self.key})", "---"]
+        out = [f"# [{_amd_text(self.title)}]({self.key})"]
+        # Provenance, as an author-only synopsis. `_quest_title` rewrites the title for
+        # readability, so after conversion the raw 2.8 event name is the only way back
+        # to the source mission - and it was being thrown away. `= ` never renders to a
+        # player; it shows in hover and the outline, which is exactly where someone
+        # asking "where did this record come from?" is looking.
+        if self.source_name and _amd_text(self.source_name) != _amd_text(self.title):
+            out.append(f"= 2.8 event: {_amd_text(self.source_name)}")
+        out.append("---")
         implied = _IMPLIED_BY_KIND.get(self.kind or "", {})
         if self.kind:
             out.append(self.kind)          # the kind line is the FIRST line of a fence
