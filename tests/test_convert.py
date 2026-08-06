@@ -866,6 +866,19 @@ class ConvertTests(unittest.TestCase):
         with open(os.path.join(dm, "story.json"), encoding="utf-8") as f:
             self.assertNotIn("LegendaryMissions.documents.", f.read())
 
+    def test_races_addon_is_baseline_so_fleets_has_its_data(self):
+        # `fleets` has been baseline since the beginning, but LM moved the fleet
+        # composition ladders (and the interiors for hulls the base game ships empty)
+        # OUT of it and into `races`. Listing `fleets` alone gets the code without the
+        # data: fleet_create finds no table, prints one line, returns None -- a fleet
+        # that spawns nothing and a mission that quietly has no enemies.
+        for target in ("mast", "amd"):
+            d = convert_file(self.xml, self.out + target, target=target)
+            with open(os.path.join(d, "story.json"), encoding="utf-8") as f:
+                sjson = f.read()
+            self.assertIn("LegendaryMissions.races.", sjson, target)
+            self.assertIn("LegendaryMissions.fleets.", sjson, target)
+
     def test_player_respawn_event_routed_in_the_amd_target_too(self):
         d, story = self._convert_respawn("amd")
         self.assertIn("//shared/signal/player_ship_destroyed", story)
@@ -1586,6 +1599,96 @@ class DistanceConditionTests(unittest.TestCase):
         # "Ghost" is never created -> a2x_named(), which returns None at runtime.
         story = self._story()
         self.assertIn('a2x_distance_greater(a2x_named("Ghost")', story)
+
+
+PLURAL_NAME = """<?xml version="1.0" ?>
+<mission_data version="2.8" playerShipNames_arme="Artemis">
+  <mission_description>Kill the Nimbus.</mission_description>
+  <start>
+    <create type="player" player_slot="0" x="10000" y="0" z="10000" sideValue="2"/>
+    <create type="enemy" x="70000" y="0" z="45000" name="Nimbus" sideValue="1"/>
+    <create type="enemy" x="71000" y="0" z="45000" name="Cloud Demon" sideValue="1"/>
+  </start>
+  <event name="Nimbus Down">
+    <if_not_exists name="Nimbus"/>
+    <big_message title="Victory" subtitle1="The Nimbus is gone"/>
+  </event>
+  <event name="Demon Down">
+    <if_not_exists name="Cloud Demon"/>
+    <big_message title="Victory" subtitle1="The demon is gone"/>
+  </event>
+</mission_data>
+"""
+
+
+class QuestRoleRoundTripTests(unittest.TestCase):
+    """A role the AMD target names in a trigger must be the role story.mast tags.
+
+    The AMD trigger grammar singularizes a role token so an author can write the plural
+    they'd say out loud (`destroy 6 raiders` -> the `raider` role). It did that to a
+    proper noun too, and the driver matches with an exact `has_role` -- so a 2.8 ship
+    called `Nimbus` produced `Done when: destroy 1 nimbus` against a role tagged
+    `nimbus`, and the driver went looking for `nimbu`. Nine objectives across the
+    reference corpus could never complete, silently.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        xml = os.path.join(self.tmp.name, "MISS_Plural.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write(PLURAL_NAME)
+        d = convert_file(xml, os.path.join(self.tmp.name, "out"), target="amd")
+        with open(os.path.join(d, "story.amd"), encoding="utf-8") as f:
+            self.amd = f.read()
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            self.story = f.read()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _trigger_roles(self):
+        """Every role named by a Done/Starts/Fails trigger in the emitted story.amd."""
+        out = []
+        for line in self.amd.splitlines():
+            m = re.match(r"(?:Done|Starts|Fails) when:\s*(?:destroy|kill)\s+\d+\s+(\S+)",
+                         line.strip())
+            if m:
+                out.append(m.group(1))
+        return out
+
+    def test_a_name_ending_in_s_is_not_left_to_be_singularized(self):
+        # No suffix on a name that is already safe -- the rule only fires where it must.
+        self.assertIn('add_role(obj_cloud_demon, "cloud_demon")', self.story)
+        self.assertIn("destroy 1 cloud_demon", self.amd)
+        # ...and the one that would be mangled carries the explicit role instead.
+        self.assertIn('add_role(obj_nimbus, "nimbus_target")', self.story)
+        self.assertIn("destroy 1 nimbus_target", self.amd)
+        self.assertNotIn("destroy 1 nimbus\n", self.amd)
+
+    def test_every_trigger_role_is_tagged_in_the_mast(self):
+        tagged = set(re.findall(r'add_role\([^,]+,\s*"([^"]+)"\)', self.story))
+        named = self._trigger_roles()
+        self.assertTrue(named, "no kill triggers emitted -- the fixture stopped covering this")
+        for role in named:
+            self.assertIn(role, tagged, role)
+
+    def test_round_trips_through_the_real_amd_trigger_grammar(self):
+        # The check that actually matters: run the emitted token through the library the
+        # quest driver uses, and assert it lands on a role story.mast tagged. Skipped when
+        # sbs_utils isn't importable -- the tool itself must never depend on it.
+        try:
+            from sbs_utils.procedural.amd_quest import amd_trigger
+        except ImportError:
+            self.skipTest("sbs_utils not importable in this environment")
+        tagged = set(re.findall(r'add_role\([^,]+,\s*"([^"]+)"\)', self.story))
+        for line in self.amd.splitlines():
+            m = re.match(r"(?:Done|Starts|Fails) when:\s*(.+)", line.strip())
+            if not m:
+                continue
+            parsed = amd_trigger(m.group(1))
+            role = (parsed[1] or {}).get("role") if parsed else None
+            if role:
+                self.assertIn(role, tagged, m.group(1))
 
 
 if __name__ == "__main__":

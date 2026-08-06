@@ -78,8 +78,13 @@ LM is a set of **MAST addon libraries** (`.mastlib`) that provide standard gamep
 consoles, docking, comms, damage, prefabs, fleets, upgrades, etc. A gameplay port needs
 them, so the tool lists them in the generated `story.json`.
 
-- **Baseline addons** always written: `consoles, docking, comms, damage, prefabs, fleets`
-  (`_BASELINE_ADDONS` in `convert.py`).
+- **Baseline addons** always written: `consoles, docking, comms, damage, prefabs, fleets,
+  races, science_scans, basic_player_destroy` (`_BASELINE_ADDONS` in `convert.py`). The
+  first six are LM's own recommended set for a standard combat mission; the last three
+  each have a reason written next to them — see `docs/coverage.md`. **When LM moves
+  content between addons, this list is what goes stale**: `races` is baseline because
+  the fleet composition ladders and the missing-hull ship interiors moved OUT of
+  `fleets` into it, so listing `fleets` alone now gets the code without the data.
 - **Feature-detected** addons get added as the emitters encounter the need (`em.addons`):
   e.g. `upgrades` for pickups, `ai` for `add_ai`, `fleets` for elite abilities.
 - **What the generated MAST relies on from LM:**

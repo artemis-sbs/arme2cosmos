@@ -95,13 +95,15 @@ mission is -- is `fleets, docking, prefabs, comms, consoles, damage`. Those are 
 baseline. The rest are feature-detected as the emitters encounter the need (`upgrades`
 for pickups, `hangar` for carried craft, `gamemaster*` for GM buttons, ...).
 
-Two more are baseline **because 2.8 gives them to every mission for free**, so keying
-them off a source feature silently leaves a converted mission missing them:
+Three more are baseline. Two **because 2.8 gives them to every mission for free**, so
+keying them off a source feature silently leaves a converted mission missing them; the
+third because a baseline addon's own data moved into it:
 
 | Addon | Why baseline |
 |---|---|
 | `science_scans` | `consoles` supplies the Science *console*; the scan RESPONSE routes live here. In 2.8 you can scan anything, so gating this on the source happening to use `set_ship_text scan_desc` left most missions with a Science console that answers nothing. |
 | `basic_player_destroy` | Owns `//shared/signal/player_ship_destroyed`: deletes the ship, announces the loss, ends the game when the last player dies, and reassigns orphaned clients. Without it a 2.8 "you were destroyed" event fires but the mission never ends and the crew sits on a wreck. |
+| `races` | Holds the per-race CONTENT the other addons look up: the **fleet composition ladders** `fleets`' own `fleet_create` reads (`fleet_table_get`) and the **ship interiors** for the hulls the base game ships without one. LM moved the ladders out of `fleets` and into `races`, so `fleets` — baseline here since the beginning — no longer carries the data it needs: `fleet_create` finds no table, prints one line and returns `None`, i.e. a fleet that spawns nothing and a mission that quietly has no enemies. The interiors bite as soon as a `--hullmap` puts the crew on a non-TSN hull: every Torgoth, Skaraan, Kralien, Biomech and Pirate entry in the base `grid_data.json` is **empty**, and a hull with no interior has a dead Engineering console. Both halves are settings-gated (`PLAYABLE_RACES` / `NPC_RACES`) and both default to "no restriction", so listing it costs a converted mission nothing it does not use. |
 
 And one feature-detected addon is easy to miss because the need is implicit in terrain:
 

@@ -31,8 +31,23 @@ from .parser import parse_file
 #                         announces the loss, ends the game when the last player dies, and
 #                         reassigns orphaned clients. Without it a 2.8 "you were destroyed"
 #                         event fires but the game never ends and the crew sits on a wreck.
+#   races              -- the CONTENT the other addons look up by race, moved OUT of them:
+#                         the fleet composition ladders (`fleet_table_load_yaml`) that
+#                         `fleets`' own `fleet_create` reads, and the ship interiors
+#                         (`grid_merge_ascii`) for the hulls the base game ships without
+#                         one. `fleets` has been baseline here since the beginning, and
+#                         since LM moved the ladders out it no longer carries the data it
+#                         needs: `fleet_create` finds no table, prints one line, and
+#                         returns None -- a fleet that spawns nothing and a mission that
+#                         quietly has no enemies. The interiors matter as soon as a
+#                         --hullmap puts the crew on a non-TSN hull (every Torgoth,
+#                         Skaraan, Kralien, Biomech and Pirate ship has an EMPTY interior
+#                         in the base grid_data.json), which is a dead Engineering
+#                         console. Both halves are settings-gated (PLAYABLE_RACES /
+#                         NPC_RACES), and both default to "no restriction", so listing it
+#                         costs a converted mission nothing it does not use.
 _BASELINE_ADDONS = ["consoles", "docking", "comms", "damage", "prefabs", "fleets",
-                    "science_scans", "basic_player_destroy"]
+                    "races", "science_scans", "basic_player_destroy"]
 # Library version tag the generated story.json references. Matches the libs shipped
 # in the missions __lib__ folder; override with `convert --lib-version`.
 DEFAULT_LIB_VERSION = "v1.4.0"

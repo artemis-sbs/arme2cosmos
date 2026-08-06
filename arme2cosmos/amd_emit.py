@@ -189,6 +189,30 @@ def _fleet_sizes(mission: Mission) -> dict[str, int]:
     return sizes
 
 
+def _quest_role(name: str) -> str:
+    """A 2.8 object name -> the role the tool BOTH tags in story.mast and names in a
+    story.amd trigger. The two must be the same string, and naively they were not.
+
+    The AMD trigger grammar singularizes a role token so an author can write the plural
+    they'd say out loud (`destroy 6 raiders` -> the `raider` role; see
+    `amd_quest._resolve_role`). It applies that to a proper noun too, and the driver
+    matches with `has_role`, which is exact. So a 2.8 ship called `Nimbus` produced
+    `Done when: destroy 1 nimbus` against a role tagged `nimbus` -- and the driver went
+    looking for `nimbu`. The objective could never complete, silently. Nine of them
+    across the reference corpus (Nimbus, Archimedes, Nautilus, Nemesis, Rendevous), in
+    six missions.
+
+    No token resolves BACK to a role ending in a lone `s`, so the fix has to be in the
+    role: a name that would be mangled gets an explicit `_target` suffix. That reads as
+    itself in both files, and -- unlike emitting the mangled `archimede` -- it is not
+    something a human reading story.amd will "correct" straight back into a broken one.
+    """
+    role = _pyname(name).lower()
+    if role.endswith("s") and not role.endswith("ss"):
+        role += "_target"
+    return role
+
+
 def _is_player_ref(em: Emitter, n: XmlNode) -> bool:
     if n.get("player_slot") is not None:
         return True
@@ -342,7 +366,7 @@ class AmdBuilder:
                     self._add_role(self.em.player_var, _PLAYER_ROLE)
                 return
             if c.tag == "if_not_exists" and self.em.symbols.get(c.get("name") or ""):
-                role = _pyname(c.get("name")).lower()
+                role = _quest_role(c.get("name"))
                 q.goal = f"destroy 1 {role}"
                 self._add_role(self.em.symbols[c.get("name")], role)
                 return
@@ -694,7 +718,7 @@ class AmdBuilder:
             elif p2 and self.em.symbols.get(c.get("name1")):
                 target = c.get("name1")
             if target:
-                role = _pyname(target).lower()
+                role = _quest_role(target)
                 self._add_role(self.em.symbols[target], role)
                 try:
                     radius = int(float(c.get("value", "5000")))
@@ -846,7 +870,7 @@ class AmdBuilder:
             c = reals[0]
             if self._killable(c):
                 name = c.get("name")
-                role = _pyname(name).lower()
+                role = _quest_role(name)
                 self._add_role(self.em.symbols[name], role)
                 if self._target_side(name) in ("friendly", "neutral"):
                     # destroying a friendly/neutral object is a LOSS/penalty, not a goal:
