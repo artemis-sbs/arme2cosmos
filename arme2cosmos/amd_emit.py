@@ -980,6 +980,169 @@ def _quest_key(ev: Event, used: set) -> str:
 
 
 # --- assembly -------------------------------------------------------------------------
+def _comms_body_text(text: str) -> str:
+    """Comms BODY text for an AMD dialogue line.
+
+    NOT `_amd_text`: that is for headings and field values, so it flattens `^` to a
+    space and maps brackets. `^` is 2.8's LINE BREAK - `a2x.comms._clean` turns it
+    into a newline at play time - and flattening it silently reflows the message. So
+    the body keeps `^` and its brackets; only the encoding and stray CR/LF are
+    normalized, and anything that would not survive the trip is left unconverted by
+    `_comms_convertible`."""
+    s = to_ascii(text or "").replace(chr(13), " ").replace(chr(10), " ")
+    # Only the ENDS are trimmed. Collapsing internal runs would rewrite the message
+    # ("Nice work!  You'll" -> "Nice work! You'll"), and the body reader strips ends
+    # anyway - so this matches exactly what comes back out.
+    return s.strip()
+
+
+def _comms_convertible(text: str) -> bool:
+    """True when this line can live in an AMD body and read back UNCHANGED.
+
+    The format claims a few characters at the START of a body line, and `[[x]]` is an
+    inline link anywhere in one - the 2.8 corpus really does contain `[[Signal Lost]]`
+    as an in-fiction device, and it would come back as `Signal Lost`. A run holding
+    any of these keeps the old one-call-per-tag path, which is always correct. Being
+    unable to convert a line is not a failure; converting it wrongly would be."""
+    if not text:
+        return False
+    if text[0] in "%#>@-=":
+        return False                     # a body sigil would claim the line
+    if "[[" in text or "]]" in text:
+        return False                     # an inline link would rewrite it
+    if "{" in text or "}" in text:
+        return False                     # a body string is f-string formatted
+    return True
+
+
+def _caller_slug(label: str) -> str:
+    """A 2.8 `from` label -> a cue key. Just a slug: this names a SPEAKER, not a role,
+    so none of `_quest_role`'s defenses against the trigger grammar apply."""
+    import re as _re
+    out = _re.sub(r"[^A-Za-z0-9]+", "_", (label or "").strip().lower()).strip("_")
+    return out or "unknown"
+
+
+def _comms_runs(ev) -> list:
+    """Each CONTIGUOUS run of incoming_comms_text in an event."""
+    cmds = ev.commands
+    idxs = [i for i, n in enumerate(cmds) if n.tag == "incoming_comms_text"]
+    runs, cur, prev = [], [], None
+    for i in idxs:
+        if prev is not None and i != prev + 1:
+            runs.append(cur)
+            cur = []
+        cur.append(cmds[i])
+        prev = i
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def _prescan_comms_scenes(mission: Mission, em: Emitter) -> dict:
+    """Lift comms runs into AMD dialogue scenes; mark which nodes stop emitting.
+
+    Only a run whose tags AGREE about `type` and `sideValue` is converted, because
+    those two are per-tag in 2.8 and a scene carries them once. 70% of runs qualify;
+    the rest keep emitting a call each, exactly as before, so nothing is guessed.
+
+    Identical runs collapse to ONE scene - a converted mission repeats the same
+    briefing per player ship and per branch, so this is where the win is: 6128 runs
+    across the corpus are 770 distinct scenes.
+    """
+    em.comms_scene_head = {}
+    em.comms_scene_skip = set()
+    scenes: dict = {}          # signature -> {key, title, side, beats}
+    callers: dict = {}         # slug -> the exact 2.8 label
+    slug_of: dict = {}         # exact label -> its slug
+
+    def cue_for(label: str) -> str:
+        """A slug per DISTINCT label. "Sgt Stone" and "Sgt. Stone" are two different
+        callers in the corpus and both slug to `sgt_stone`, so without this the second
+        one is spoken under the first one's name."""
+        if label in slug_of:
+            return slug_of[label]
+        base = _caller_slug(label)
+        slug, n = base, 2
+        while slug in callers and callers[slug] != label:
+            slug = f"{base}_{n}"
+            n += 1
+        slug_of[label] = slug
+        callers[slug] = label
+        return slug
+
+    for ev in mission.events:
+        for run in _comms_runs(ev):
+            if len(run) < 1:
+                continue
+            types = {(n.get("type") or "").strip() for n in run}
+            sides = {(n.get("sideValue") or n.get("SideValue") or "").strip() for n in run}
+            if len(types) > 1 or len(sides) > 1:
+                continue                       # per-tag values disagree - leave it alone
+            raw = [((n.get("from") or "").strip(), _comms_body_text(n.text or ""))
+                   for n in run]
+            if not all(_comms_convertible(t) for _l, t in raw):
+                continue                       # would not read back unchanged
+            beats = [(cue_for(label) if label else "unknown", text)
+                     for label, text in raw]
+            sig = (tuple(beats), next(iter(types)), next(iter(sides)))
+            entry = scenes.get(sig)
+            if entry is None:
+                entry = {"key": f"comms_{len(scenes):03d}",
+                         "title": next(iter(types)), "side": next(iter(sides)),
+                         "beats": beats,
+                         "display": callers.get(beats[0][0], beats[0][0])}
+                scenes[sig] = entry
+            em.comms_scene_head[id(run[0])] = entry["key"]
+            for n in run[1:]:
+                em.comms_scene_skip.add(id(n))
+    return {"scenes": list(scenes.values()), "callers": callers}
+
+
+def _build_comms_amd(model: dict) -> str:
+    """The dialogue scenes + the caller list, as one AMD document.
+
+    A cue has to be a slug, but "GW 214" is what the crew reads - so the exact 2.8
+    label lives on a caller record and the runtime looks it up. That list is also the
+    obvious place for a human to give a caller a face later."""
+    scenes = model["scenes"]
+    callers = model["callers"]
+    out = ["// 2.8 incoming_comms_text runs -> dialogue scenes (a2x_comms_scene).",
+           "// Identical runs are ONE scene: a 2.8 mission repeats the same briefing",
+           "// per player ship and per branch. Edit the words here, not at the call site.",
+           "",
+           # ONE title heading, then the sections under it: `amd_root_node` is
+           # `children[0]`, so a file with two top-level headings makes the FIRST one
+           # the root and `amd_section` then searches inside it and finds nothing.
+           "# [Comms](comms)",
+           "",
+           "## [Callers](callers)",
+           "",
+           "// The exact 2.8 `from` label for each cue. Give one a Face: or Color: and",
+           "// every scene that cue speaks in picks it up.",
+           ""]
+    for slug, label in sorted(callers.items()):
+        out.append(f"### [{_amd_text(label)}]({slug})")
+    out += ["", "## [Scenes](scenes)", ""]
+    for sc in scenes:
+        out.append(f"### [{_amd_text(sc.get('display') or sc['key'])}]({sc['key']})")
+        out.append("---")
+        out.append("Dialogue")
+        if sc["title"]:
+            out.append(f"Title: {_amd_text(sc['title'])}")
+        if sc["side"]:
+            out.append(f"Side: {_amd_text(sc['side'])}")
+        out.append("---")
+        last = None
+        for slug, text in sc["beats"]:
+            if slug != last:
+                out.append(f"@{slug}")
+                last = slug
+            if text:
+                out.append(text)
+        out.append("")
+    return chr(10).join(out) + chr(10)
+
 def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[str, str]:
     """Build the full ``--target amd`` scaffold (files dict). Populates em.addons/notes."""
     from .convert import (_slug, _display_name, _prescan_named_objects,
@@ -990,6 +1153,9 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
 
     _prescan_named_objects(mission, em)
     _prescan_timers(mission, em)
+    # Must run BEFORE any event body is emitted: it decides which comms nodes stop
+    # emitting a call of their own because a scene now holds their lines.
+    em.comms_model = _prescan_comms_scenes(mission, em)
     em.addons.add("quests")  # LM quest_driver reads the granted AMD
     # ...and the tab that DISPLAYS it. quest_driver only runs the tree; the quest log the
     # crew reads is `documents/quest_tab.mast` (gui_tab_add_top("quest"), shown on the
@@ -1094,6 +1260,8 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     # 2.8 scan_desc recovered as declarative science scans (loaded by story.mast).
     if em.scans:
         files["scans.amd"] = _build_scans_amd(em.scans)
+    if getattr(em, "comms_model", None) and em.comms_model["scenes"]:
+        files["comms.amd"] = _build_comms_amd(em.comms_model)
     return files
 
 
@@ -1181,6 +1349,11 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
         L.append("    # 2.8 set_ship_text scan_desc -> declarative science scans")
         L.append('    science_define_scan_amd(document_get_amd_file('
                  'get_mission_dir_filename("scans.amd"), data_parser=amd_scan_data))')
+    if getattr(em, "comms_model", None) and em.comms_model["scenes"]:
+        L.append("    # 2.8 comms runs -> dialogue scenes; a2x_comms_scene plays one by key")
+        L.append('    comms_doc = amd_document(media_read_relative_file("comms.amd"))')
+        L.append('    a2x_comms_callers_load(amd_section(comms_doc, "callers"))')
+        L.append('    a2x_comms_scenes_load(amd_section(comms_doc, "scenes"))')
     L.append("")
 
     active_watchers = [gl for gl, _c in builder.watchers if gl not in builder.deferred_gates]

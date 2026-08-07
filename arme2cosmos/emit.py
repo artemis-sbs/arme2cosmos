@@ -548,6 +548,17 @@ class Emitter:
 
     def c_comms_text(self, n: XmlNode) -> list[str]:
         self.addons.add("comms")
+        # A contiguous run of comms tags that all AGREE about type and sideValue was
+        # lifted into an AMD dialogue scene (see _prescan_comms_scenes). The head of
+        # the run emits one call in the run's exact position - 6096 of the corpus's
+        # 6112 comms-bearing events keep their comms in a single unbroken block, so
+        # nothing moves relative to the spawns and timers around it - and the rest of
+        # the run emits nothing, because the scene already holds those lines.
+        scene = getattr(self, "comms_scene_head", {}).get(id(n))
+        if scene is not None:
+            return [f'    a2x_comms_scene("{scene}")']
+        if id(n) in getattr(self, "comms_scene_skip", set()):
+            return []
         frm = _mast_str(n.get("from", ""))
         body = _mast_str(n.text or "")  # ^ line-breaks preserved; a2x_clean converts them
         # 2.8 `from` is just the sender label (the comms title), not an object reference.
