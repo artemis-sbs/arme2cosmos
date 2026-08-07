@@ -1039,6 +1039,33 @@ def _comms_runs(ev) -> list:
     return runs
 
 
+def _uniform_pieces(run: list) -> list:
+    """Split a comms run at every change of `type` / `sideValue`.
+
+    Those two are PER-TAG in 2.8 and per-SCENE here, so a run that changes either
+    cannot be one scene without dropping the distinction. Splitting is the answer that
+    costs no format change: the pieces were adjacent to begin with, so consecutive
+    scene calls play in exactly the original order.
+
+    It is nearly free in practice. 1804 of the corpus's 1810 mixed runs are two tags
+    long, and 1792 of those are `Data Link Upload` + `Hacking Program` - two machine
+    notifications that happen to be neighbours, never a conversation. Only 18 runs in
+    the whole corpus are a real two-sided exchange that this turns into two scenes.
+    """
+    pieces, cur, key = [], [], None
+    for n in run:
+        k = ((n.get("type") or "").strip(),
+             (n.get("sideValue") or n.get("SideValue") or "").strip())
+        if key is not None and k != key:
+            pieces.append(cur)
+            cur = []
+        cur.append(n)
+        key = k
+    if cur:
+        pieces.append(cur)
+    return pieces
+
+
 def _prescan_comms_scenes(mission: Mission, em: Emitter) -> dict:
     """Lift comms runs into AMD dialogue scenes; mark which nodes stop emitting.
 
@@ -1073,29 +1100,26 @@ def _prescan_comms_scenes(mission: Mission, em: Emitter) -> dict:
 
     for ev in mission.events:
         for run in _comms_runs(ev):
-            if len(run) < 1:
-                continue
-            types = {(n.get("type") or "").strip() for n in run}
-            sides = {(n.get("sideValue") or n.get("SideValue") or "").strip() for n in run}
-            if len(types) > 1 or len(sides) > 1:
-                continue                       # per-tag values disagree - leave it alone
-            raw = [((n.get("from") or "").strip(), _comms_body_text(n.text or ""))
-                   for n in run]
-            if not all(_comms_convertible(t) for _l, t in raw):
-                continue                       # would not read back unchanged
-            beats = [(cue_for(label) if label else "unknown", text)
-                     for label, text in raw]
-            sig = (tuple(beats), next(iter(types)), next(iter(sides)))
-            entry = scenes.get(sig)
-            if entry is None:
-                entry = {"key": f"comms_{len(scenes):03d}",
-                         "title": next(iter(types)), "side": next(iter(sides)),
-                         "beats": beats,
-                         "display": callers.get(beats[0][0], beats[0][0])}
-                scenes[sig] = entry
-            em.comms_scene_head[id(run[0])] = entry["key"]
-            for n in run[1:]:
-                em.comms_scene_skip.add(id(n))
+            for piece in _uniform_pieces(run):
+                raw = [((n.get("from") or "").strip(), _comms_body_text(n.text or ""))
+                       for n in piece]
+                if not all(_comms_convertible(t) for _l, t in raw):
+                    continue                   # would not read back unchanged
+                beats = [(cue_for(label) if label else "unknown", text)
+                         for label, text in raw]
+                title = (piece[0].get("type") or "").strip()
+                side = (piece[0].get("sideValue")
+                        or piece[0].get("SideValue") or "").strip()
+                sig = (tuple(beats), title, side)
+                entry = scenes.get(sig)
+                if entry is None:
+                    entry = {"key": f"comms_{len(scenes):03d}",
+                             "title": title, "side": side, "beats": beats,
+                             "display": callers.get(beats[0][0], beats[0][0])}
+                    scenes[sig] = entry
+                em.comms_scene_head[id(piece[0])] = entry["key"]
+                for n in piece[1:]:
+                    em.comms_scene_skip.add(id(n))
     return {"scenes": list(scenes.values()), "callers": callers}
 
 
