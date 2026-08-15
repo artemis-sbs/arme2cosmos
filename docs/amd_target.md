@@ -25,14 +25,15 @@ is the same shape expressed declaratively:
 
 | Quest fence field | Role | 2.8 analogue |
 |---|---|---|
-| `Goal:` / `When:` | completion **trigger** | an event's `if_*` conditions |
+| `Done when:` | completion **trigger** | an event's `if_*` conditions |
+| `Starts when:` | when it ARMS (a real gate since 2026-07-28) | the flag that reveals the event |
 | activation | scene entry | the event body running |
 | `Then: reveal` | next scene | a `set_variable` a later event waits on |
 | `Then: signal` | side effect | `set_variable` that fires other logic |
 | `Win:` / `Lose:` | game-over | `end_mission` gated by a success/fail flag |
-| `Critical:` / `Required:` / `Parent:` | mission tree | flag topology among end-game events |
-| `Fail after:` | timed loss | `set_timer` + `if_timer_finished` gate |
-| `Fail on all dead:` | wipe loss | `if_not_exists` of the last of a role |
+| `Fatal:` / `Required:` / `Part of:` | mission tree | flag topology among end-game events |
+| `Fails when: <N> seconds` | timed loss | `set_timer` + `if_timer_finished` gate |
+| `Fails when: all dead <role>` | wipe loss | `if_not_exists` of the last of a role |
 
 The payoff: the weakest part of today's output — the hand-rolled end-game and
 event machinery — becomes declarative data, and the port gets a **live quest log,
@@ -55,12 +56,12 @@ AMD quest fences carry only *declarative* fields. A 2.8 event body is *imperativ
      scene begins (a revealed quest).
    - `=== gate_N` polling watchers — the **escape hatch**: for any trigger AMD's verb
      set can't express, a tiny loop that `signal_emit`s when the condition holds; the
-     quest listens `When: signal a2x_gate_N`. The watcher body is exactly today's
+     quest listens `Starts when: signal a2x_gate_N`. The watcher body is exactly today's
      [`_cond_bool`](../arme2cosmos/emit.py) polling loop, stripped to a signal source.
 
 ```
 scene entry (quest_activated)  ─▶  do spawns / comms         [imperative → MAST route]
-scene exit  (Goal / When)      ─▶  kill / dock / collect / signal   [trigger → AMD]
+scene exit  (Done when)        ─▶  kill / dock / collect / signal   [trigger → AMD]
 next scene  (Then: reveal)     ─▶  reveal the follow-up quest        [tree → AMD]
 ```
 
@@ -72,18 +73,22 @@ fences + signal routes.
 
 ## Field-by-field mapping
 
-### Triggers (`Goal:` / `When:`) — [`amd_quest.TRIGGER_VERBS`]
+### Triggers (`Done when:` / `Starts when:`) — [`amd_quest.TRIGGER_VERBS`]
+
+One grammar answers all three life-cycle questions (`Starts when:` / `Done when:` /
+`Fails when:`); `Goal:` / `When:` / `Fail after:` / `Complete after:` are the retired
+spellings and still parse, but the emitter writes the current ones.
 
 | 2.8 condition | AMD | Notes |
 |---|---|---|
-| `if_fleet_count fleetN <=0` | `Goal: destroy <count> fleet_N` | count = fleet size at spawn; ship tagged `role("fleet_N")` |
-| sole `if_not_exists <enemy>` | `Goal: destroy 1 <role>` | named enemy tagged with a synthesized role |
-| generic "kill all hostiles" | `Goal: destroy N enemies` | → `hostile=True` scoring, ceasefire-safe ([amd_quest.py:89]) |
-| pickup + collect | `Goal: collect <item>` | pairs with `amd_items` |
-| science scan | `Goal: scan <role>` + `Reveals:` | **recovers the dropped `scan_desc`** |
-| sole `if_docked` | `Goal: dock <role>` | replaces the `//signal/ship_docked` route |
-| sole `if_variable F == v` | `When: signal a2x_flag_F` | `set_variable` already `signal_emit`s (existing trick) |
-| anything else (box, distance-to-object, property, multi-cond) | `When: signal a2x_gate_N` | **escape-hatch watcher** |
+| `if_fleet_count fleetN <=0` | `Done when: destroy <count> fleet_N` | count = fleet size at spawn; ship tagged `role("fleet_N")` |
+| sole `if_not_exists <enemy>` | `Done when: destroy 1 <role>` | named enemy tagged with a synthesized role |
+| generic "kill all hostiles" | `Done when: destroy N enemies` | → `hostile=True` scoring, ceasefire-safe ([amd_quest.py:89]) |
+| pickup + collect | `Done when: collect <item>` | pairs with `amd_items` |
+| science scan | `Done when: scan <role>` + `Reveals:` | **recovers the dropped `scan_desc`** |
+| sole `if_docked` | `Done when: dock <role>` | replaces the `//signal/ship_docked` route |
+| sole `if_variable F == v` | `Starts when: signal a2x_flag_F` | `set_variable` already `signal_emit`s (existing trick) |
+| anything else (box, distance-to-object, property, multi-cond) | `Starts when: signal a2x_gate_N` | **escape-hatch watcher** |
 
 `reach`/`travel` (`on_reach`) is **sector**-grid based while 2.8 uses absolute
 coords; the converter deliberately routes distance/region triggers through the
@@ -95,9 +100,9 @@ escape hatch rather than mis-map them to `reach`.
 |---|---|
 | `end_mission` gated by a "success" flag | `Win: <prose reason>` on the deciding quest |
 | `end_mission` gated by a "fail" flag | `Lose: <prose reason>` |
-| success requires several sub-goals | `Parent:` + `Required:` children |
-| a sub-goal whose failure loses the game | `Critical: true` |
-| `set_timer` + `if_timer_finished` → lose | `Fail after: N minutes` (lazy-anchored on ACTIVE) |
+| success requires several sub-goals | `Part of:` + `Required:` children |
+| a sub-goal whose failure loses the game | `Fatal: true` |
+| `set_timer` + `if_timer_finished` → lose | **not emitted** -- see Measured findings |
 | `if_not_exists` of the last of a role → lose | `Fail on all dead: <role>` |
 
 **Win/lose detection heuristic.** Trace the flag that gates the `end_mission`
@@ -114,7 +119,7 @@ the scaffold philosophy (never invent game logic).
 |---|---|
 | event commands (spawn, comms, log…) | `//signal/quest_activated if QUEST_ID == "<key>"` body |
 | `set_variable F` that a later event waits on | `Then: reveal <next_quest>` (reveal-chain) |
-| `Pays`-like reward (rare in 2.8) | `Pays:` |
+| a reward (rare in 2.8) | `Reward:` |
 
 ---
 
@@ -131,19 +136,17 @@ chained on a `Jump` flag, and three end-game events (`Mission End Sucess`,
 # [Defeat the Bad Alien](main)
 ---
 Scope: shared
-State: active
-Goal: destroy 1 bad_alien
+Done when: destroy 1 bad_alien
 Win: Congrats! You Saved Us! You are being awarded a medal.
 ---
 Destroy the Bad Alien attacking the station.
-// TODO 2.8 also required Station 1 to survive (if_exists) - model as a Critical child.
+// TODO 2.8 also required Station 1 to survive (if_exists) - model as a Fatal child.
 
 # [Keep Your Ship Alive](survive)
 ---
 Scope: shared
-State: active
-Critical: true
-Fail on all dead: player_hero
+Fatal: true
+Fails when: all dead player_hero
 Lose: You Died. We are doomed!
 ---
 Do not let the Artemis be destroyed.
@@ -199,9 +202,9 @@ text) — to a quest:
 - Flag guards are split: the end-game terminal flags, the event's own run-once/advance
   flags, and "not-yet" latches (`!= v` / `== 0`) are **dropped**; a surviving phase
   gate (a flag another event sets to a positive value) **folds into the trigger**.
-- A clean kill (`if_not_exists NAME` with no surviving gate) → native `Goal: destroy 1
+- A clean kill (`if_not_exists NAME` with no surviving gate) → native `Done when: destroy 1
   <role>`; a phase-gated or non-kill trigger → an escape-hatch watcher that ANDs the
-  trigger with its phase gate → `When: signal a2x_gate_N`.
+  trigger with its phase gate → `Starts when: signal a2x_gate_N`.
 - The event's `big_message`/comms becomes the quest's **objective text** (2.8 has none).
 - Bare **mechanism** events (a trigger but no player text and no kill goal — beacon
   toggles, score bookkeeping) are **not** objectives and stay background loops.
@@ -219,7 +222,7 @@ targets. 2.8's always-true `if_not_exists name="."` / `".."` sentinels are filte
 It is revealed when its gating flag is reached (the same reveal graph), then after a
 few seconds fires its narrative and its own `set_variable` (which reveals the next
 beat), so a 2.8 flag-chained narrative sequence reads as a chain of story beats. The
-body runs on `quest_completed` (via `Complete after:`) because `quest_reveal` does not
+body runs on `quest_succeeded` (via a `Done when: <N> seconds`) because `quest_reveal` does not
 emit `quest_activated`. Multi-gated narrated events stay loops (the reveal graph can't
 defer them without firing prematurely).
 
@@ -237,21 +240,21 @@ Multi-gate / start-produced / unproduced gates stay active from the start (corre
 over cleverness).
 
 **Side-aware kills (implemented).** `if_not_exists <target>` is read against the
-target's 2.8 `sideValue`: an **enemy** target → `Goal: destroy 1 <role>`; a
-**friendly/neutral** target → a **protect** objective `Fail on all dead: <role>`
+target's 2.8 `sideValue`: an **enemy** target → `Done when: destroy 1 <role>`; a
+**friendly/neutral** target → a **protect** objective `Fails when: all dead <role>`
 (destroying it is a penalty/loss, not a goal), titled `Protect <name>`, with its 2.8
 body routed on `//signal/quest_failed` (the penalty payload). Corpus: 13 protect
 quests in Cruiser alone (e.g. `Protect DS1`, was a backwards `destroy` goal).
 
 **Kill aggregation (implemented).** When a mission has >=3 per-ship
-`Goal: destroy 1 <role>` objectives, they roll under one synthetic `Parent: hostile_fleet`
+`Done when: destroy 1 <role>` objectives, they roll under one synthetic `Part of: hostile_fleet`
 ("Destroy the hostile fleet") as `Required:` children — the parent completes when every
 child does, so a fleet of individual kills reads as one mission objective. Left flat
 (all children required, no auto-`Win:`); which kills are optional and whether clearing
 the fleet wins are per-mission decisions (flagged as a TODO on the parent).
 
-Side-awareness covers **both** branches: a sole friendly death → `Fail on all dead:`
-(event-driven, native branch); a **phase-gated** friendly death → `Fail on signal:
+Side-awareness covers **both** branches: a sole friendly death → `Fails when: all dead <role>`
+(event-driven, native branch); a **phase-gated** friendly death → `Fails when: signal
 <gate>` (the watcher fires the same `quest_signal` that `quest_on_signal` also uses to
 **fail** a quest), still deferred/secret via the reveal graph. Both title as
 `Protect <name>` and route the 2.8 body on `//signal/quest_failed`.
@@ -266,9 +269,9 @@ Side-awareness covers **both** branches: a sole friendly death → `Fail on all 
   lost; the quest tree still owns the objective and its state.
 - **Timed narrative beats** (`if_timer_finished` chains) — a clean chain of `>=2`
   pure timed beats (exactly `if_timer_finished T` + `if_variable F == n`, advancing
-  `F`) is now emitted as a **reveal chain**: each beat is a `Complete after: N seconds`
+  `F`) is now emitted as a **reveal chain**: each beat is a `Done when: N seconds`
   quest that `Then: reveal`s the next, with its payload on
-  `//signal/quest_completed if QUEST_ID == "<key>"`. This required a small **library
+  `//shared/signal/quest_succeeded if QUEST_ID == "<key>"`. This required a small **library
   addition** — a `Complete after:` vocabulary in `amd_quest.py` and a symmetric
   `quest_tick_complete_after()` watcher in the LM `quest_driver` (mirrors
   `Fail after:` / `quest_tick_fail_after`). A beat carrying an extra guard (e.g. an
@@ -335,14 +338,60 @@ This is the intended shape of the tool↔library relationship: when a conversion
 new behaviour, add a small declarative primitive to `sbs_utils`/LM and have the tool
 emit it, rather than hand-rolling the mechanism in generated MAST.
 
+## Measured findings (2026-08-15) — what was checked and left alone
+
+Three candidate additions were sized against the corpus before building. All three came
+back empty, and are recorded here so the next person does not re-derive them.
+
+- **`Action:` stage directions on story beats — NOT built.** Across 1279 story-beat bodies
+  the commands are 5402 `set_variable`, 3865 `clear_comms_button`, 2015
+  `incoming_comms_text`, 814 `set_comms_button`, 779 `set_timer` -- plumbing. Of AMD's six
+  core verbs, `becomes` has no 2.8 source (2.8 has no roles), `arrives` needs a **declared
+  landmark record** the converter does not emit, `departs` is ~0, and `hails` would regress
+  the existing comms-scene extraction (`a2x_comms_scene`), which lifts contiguous comms runs
+  into real AMD dialogue scenes. What remains is `joins <side>`: **~20 lines out of ~13,000**.
+  Converting 20 and leaving 12,980 in the MAST route would make a beat's effects live in two
+  places, which reads worse than one.
+- **`Fails when: <N> seconds` — NOT emitted.** Of 46 decider quests corpus-wide, **zero**
+  fit the shape it would be sound for. `fail_after` anchors when the quest goes ACTIVE, so
+  the mapping is only correct when the 2.8 timer is armed at that same moment; 24 timed
+  deciders are WIN not LOSE, and the one timed LOSE is not armed at activation. The timer
+  routes already express these exactly (`Starts when: signal <gate>`, pushed at the
+  deadline).
+- **`sbs lint` on generated AMD: 0 findings** across 8 missions. The vocabulary the emitter
+  writes is current; there was nothing to catch up on.
+
+## Library bug this work uncovered (2026-08-15)
+
+Adopting `set_timer(signal=)` surfaced a real defect in it: **the signal fired and no route
+ran**. `_signals_tick` runs outside any task, and the MastScheduler leaves its last task in
+`FrameContext.task` without restoring it -- by then that task is FINISHED.
+`signal_emit` passes it as the sender and `MastAsyncTask.emit_signal` drops any emit whose
+sender is done (`mastscheduler.py:909`), so every `//signal` and `//shared/signal` route was
+skipped.
+
+The library's 24 `TestTimerSignals` cases all passed through it, because they assert via
+`signal_observe` -- which runs *before* `signal_emit` even looks at the MAST context -- and
+call `_signals_tick()` by hand. Repro: a two-label mission where the same signal is emitted
+by a timer and by MAST; only the MAST one runs the route.
+
+Fixed in `sbs_utils/procedural/timers.py` by clearing `FrameContext._task` (only the task;
+page and event still belong to the frame) around the emit, with two regression tests in
+`sbs_utils/tests/test_timers.py`.
+
 ## Open questions
 
 - **Win/lose keyword heuristic** — good enough on the corpus, but titles are
   free-text. Worth a `--win-flag NAME` / `--lose-flag NAME` override?
-- **Station/multi-condition wins** — `Goal:` is a single trigger. A win requiring
-  "kill X *and* keep Y alive" needs a `Parent:` + `Required:` child (kill) plus a
-  `Critical:` child (`Fail on all dead:` Y). Auto-decompose, or scaffold + TODO?
+- **Station/multi-condition wins** — `Done when:` is a single trigger. A win requiring
+  "kill X *and* keep Y alive" needs a `Part of:` + `Required:` child (kill) plus a
+  `Fatal:` child (`Fails when: all dead Y`). Auto-decompose, or scaffold + TODO?
 - **Roles for goal targets** — the converter tags targets with synthesized roles
   (`bad_alien`, `fleet_1`). Confirm naming rules so hand-authored follow-ups agree.
 - **`reach` sectors** — is a coord→sector table worth building so region triggers
   can use the native `on_reach` verb instead of the escape hatch?
+- **Objective and decider quests still run their bodies on completion**
+  (`//shared/signal/quest_succeeded if QUEST_ID == ...`). Now that `Starts when:` is a real
+  arming gate, a 2.8 event could instead be a quest with `Starts when: <trigger>` and its
+  body in the start slot -- a closer model of "when these conditions hold, do this". Left
+  alone here: it touches the reveal graph, kill aggregation and win/lose wiring at once.

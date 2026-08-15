@@ -250,6 +250,8 @@ turns polling into event-driven routes. Selectable with `--event-model`:
   - sole `if_not_exists X` -> spawn once + `//damage/destroy if has_role(DESTROYED_ID, "respawn_X")`.
   - sole `if_docked` -> `//signal/ship_docked` (LM docking emits this on station dock).
   - sole `if_variable F == v` -> `//signal/a2x_flag_F`; the matching `set_variable` also `signal_emit`s it.
+  - `if_timer_finished` -> a `//shared/signal` route the timer itself pushes. See
+    [The timer model](#the-timer-model).
   - Multi-condition events stay polling loops **on purpose**: a pure route would miss the
     "gate flag opens after the object died / undocked" case that a per-tick loop catches.
 - **Flags** are `shared` + forward-declared (`default shared F = 0`) so concurrent tasks/routes read them.
@@ -282,6 +284,55 @@ turns polling into event-driven routes. Selectable with `--event-model`:
     not care (its events all run continuously, so order is free) but a linear chain would
     deadlock, and a deadlocked mission is worse than a mistimed one -- so those skip, and
     MIGRATION_NOTES reports the count.
+
+---
+
+## The timer model
+
+Timers are not a corner of 2.8, they are its main clock: **3382 `set_timer` and 1525
+`if_timer_finished`** across the reference corpus, and **1546 of 8699 events** are gated on
+one. Every one of them used to become a `delay_sim(0.5)` task resident from t=0 -- 1839 of
+them corpus-wide, oversampling a median 10-second timer by 20x.
+
+A Cosmos timer can now announce its own deadline (`set_timer(..., signal=)` /
+`set_interval`), so most of that polling becomes a route the engine fires once. Whether a
+given timer can is a property of how the **whole mission** uses it, so
+`convert._prescan_timer_model` decides it once, for both targets:
+
+| Verdict | The 2.8 shape | Emitted |
+|---|---|---|
+| `INTERVAL` | an event tests the timer and its own body re-arms it, same period -- 2.8's "every N seconds" | `set_interval(0, T, sig, seconds=N)`; the in-body re-arm is dropped |
+| `INTERVAL_RAMP` | the same, but the first wait differs from the repeat (a lead-in, then a beat) | a self-re-arming `set_timer(..., signal=)` -- what 2.8 literally wrote |
+| `ONESHOT` | armed from exactly one place, and tested | `set_timer(..., signal=)` |
+| `POLL` | armed from several unrelated places | unchanged; which arming is live is a runtime question |
+| `DEAD` | armed but never tested | unchanged; nothing is listening |
+
+An event on a pushed timer is then wired one of three ways:
+
+- **the timer is its only condition** -> the route body IS the event. No loop.
+- **a repeating timer with other conditions** -> a route that re-checks the rest on each
+  beat. A guard that is false gets another beat, which is the same "keep trying" the 0.5s
+  loop was doing, at the author's own period.
+- **a one-shot timer with other conditions** -> the loop stays, but the timer's signal
+  **starts** it. Exactly equivalent: the event cannot fire before the deadline, so every
+  tick before it was never going to do anything.
+
+Corpus effect (tasks resident at t=0): **AMD target 2309 -> 1763 (-23%)**, MAST target
+743 -> 543 (-26%). The Arena 299 -> 214, Pandora 51 -> 26, ShipyardEscape 10 -> 0.
+
+**Routes are `//shared/signal`, never `//signal`.** A 2.8 event body is server work -- it
+messages the crew, sets variables, moves objects, arms timers. Per-console it would happen
+once per connected console, and on a repeating timer once per console *per beat*.
+
+**The chained-scene form still polls, on purpose.** A scene chain can reach its wait long
+after the timer already fired; `await` on a signal there would hang forever. That one site
+keeps `await is_timer_set_and_finished(...)`.
+
+**Armed signals and routes must agree.** A `signal=` nobody handles is only a lie in the
+source, but the reverse -- a route waiting on a signal nothing arms -- stalls the mission at
+the first deadline and still reports `PASS`. `_commit_timer_routes` enforces the pairing and
+raises if it is handed the wrong key; `tests/test_timer_model.py` asserts the two sets are
+equal in both targets.
 
 ---
 

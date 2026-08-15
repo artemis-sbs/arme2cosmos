@@ -231,6 +231,17 @@ class Emitter:
         # Timer names any set_timer in the mission actually starts. A condition naming a
         # timer NOTHING sets can never fire in 2.8, so waiting on it would hang the chain.
         self.timers_set: set[str] = set()
+        # The timer MODEL, decided once by convert._prescan_timer_model (see there for the
+        # verdicts). A timer that can announce itself replaces a 0.5s polling loop with a
+        # //shared/signal route, so both targets need the same verdict for the same name.
+        self.timer_verdict: dict[str, str] = {}   # 2.8 timer name -> verdict
+        self.timer_signal: dict[str, str] = {}    # 2.8 timer name -> signal it emits
+        self.timer_period: dict[str, str] = {}    # 2.8 timer name -> steady-state seconds
+        # What each individual <set_timer> NODE emits. Keyed by id(node) because the same
+        # timer is armed from several places and they do not all emit the same thing: an
+        # interval is armed once and its in-body re-arm is dropped (the interval re-fires
+        # by itself). Values: {"form": interval|signal|plain|drop, "signal": ..., ...}.
+        self.timer_node_plan: dict[int, dict] = {}
         # True only while the <start> roster is being emitted into
         # //shared/signal/create_player_ships. Everywhere else a `create
         # type="player"` PLACES an existing ship (2.8 has 8 fixed slots), so
@@ -535,7 +546,26 @@ class Emitter:
         return out
 
     def c_set_timer(self, n: XmlNode) -> list[str]:
-        return [f'    set_timer(0, "{n.get("name")}", seconds={n.get("seconds", "0")})']
+        """Arm a 2.8 timer -- as a signal source where the mission's use of it allows.
+
+        A timer that ANNOUNCES itself (``signal=`` / ``set_interval``) replaces a resident
+        0.5s polling task with a route the engine fires once, at the deadline. Which form
+        this particular arming site takes was decided by ``convert._prescan_timer_model``;
+        an unclassified timer keeps the plain, poll-only form it always had.
+        """
+        name, secs = n.get("name"), n.get("seconds", "0")
+        plan = self.timer_node_plan.get(id(n))
+        form = (plan or {}).get("form", "plain")
+        if form == "drop":
+            # The interval's own re-arm inside the body it drives. set_interval keeps
+            # beating on its own, so re-arming would only restart the same clock.
+            return [f'    # 2.8 re-armed "{name}" here; the interval above already repeats']
+        if form == "interval":
+            # signal is the THIRD POSITIONAL argument of set_interval, not a keyword.
+            return [f'    set_interval(0, "{name}", "{plan["signal"]}", seconds={secs})']
+        if form == "signal":
+            return [f'    set_timer(0, "{name}", seconds={secs}, signal="{plan["signal"]}")']
+        return [f'    set_timer(0, "{name}", seconds={secs})']
 
     def c_set_difficulty(self, n: XmlNode) -> list[str]:
         return [f'    DIFFICULTY = {n.get("value", "5")}']
@@ -1128,12 +1158,30 @@ def _int_or_none(v):
         return None
 
 
+# The label names this tool generates. Since 2026-08-14 a MAST label's name is RESERVED:
+# assigning to it is a compile error, and a story that does not compile schedules no task
+# at all -- 0 labels, no output, and a headless run still reports PASS. 2.8 variable names
+# are author-written, so `<set_variable name="gate_3">` is all it would take.
+_GENERATED_LABEL = re.compile(
+    r"(?:event|ind_event|respawn|gate|beat)_\d+(?:_loop)?$"
+    r"|wait_[a-z]+_\d+$|wait_dock_\d+$")
+
+
 def _pyname(name: str) -> str:
-    """A 2.8 variable name -> a safe MAST/python identifier."""
+    """A 2.8 variable name -> a safe MAST/python identifier.
+
+    The single funnel every 2.8 name passes through, so the guard against colliding with
+    a generated LABEL name lives here: mangle it once and every reference agrees. A name
+    that needed mangling gets a trailing underscore rather than a number, so it still
+    reads as the author's word.
+    """
     out = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in (name or "var"))
     if out and out[0].isdigit():
         out = "_" + out
-    return out or "var"
+    out = out or "var"
+    if _GENERATED_LABEL.match(out):
+        out += "_"
+    return out
 
 
 def _num_key(v: str | None) -> str | None:
@@ -1149,6 +1197,64 @@ def _num_key(v: str | None) -> str | None:
 def _phase_sig_name(name: str, vkey: str) -> str:
     """The signal name for an AMD phase gate (a flag reaching a numeric value)."""
     return f"a2x_phase_{_pyname(name)}_{vkey.replace('-', 'm').replace('.', '_')}"
+
+
+# --- the timer model ---------------------------------------------------------------
+# Shared by both targets so a timer cannot be a signal source in one and a polling loop
+# in the other. The verdicts themselves are decided in convert._prescan_timer_model.
+
+# A timer whose deadline the engine announces (one-shot signal, or a repeating interval).
+TIMER_PUSHED = ("ONESHOT", "INTERVAL", "INTERVAL_RAMP")
+TIMER_REPEATS = ("INTERVAL", "INTERVAL_RAMP")
+
+
+def timer_conditions(ev) -> list[XmlNode]:
+    """Every ``if_timer_finished`` condition on an event."""
+    return [c for c in ev.conditions if c.tag == "if_timer_finished"]
+
+
+def pushed_timer(em: Emitter, ev) -> str | None:
+    """The timer name that can PUSH this event, or None.
+
+    An event gated on several timers keeps polling: only one of them can start it, and
+    which one finishes last is a runtime question. One timer is the overwhelmingly common
+    shape (2.8 authors gate on a timer plus flags, not on two clocks).
+    """
+    names = [c.get("name") for c in timer_conditions(ev)]
+    if len(names) != 1:
+        return None
+    name = names[0]
+    return name if em.timer_verdict.get(name) in TIMER_PUSHED else None
+
+
+def timer_only_trigger(em: Emitter, ev) -> str | None:
+    """The timer name when a pushed timer is this event's ONLY condition.
+
+    Such an event needs no loop at all -- the signal route IS the event.
+    """
+    name = pushed_timer(em, ev)
+    return name if name is not None and len(ev.conditions) == 1 else None
+
+
+def event_seconds(em: Emitter, ev) -> str | None:
+    """The wait a pushed timer imposes on this event, as a 2.8 seconds string."""
+    name = pushed_timer(em, ev)
+    return em.timer_period.get(name) if name else None
+
+
+def timer_guards(em: Emitter, ev) -> tuple[list[str], list[XmlNode]]:
+    """(live booleans, unmappable conditions) for everything on *ev* EXCEPT its timer.
+
+    What a signal route has to re-check when it fires: the timer half is already true by
+    construction (the route only runs at the deadline), the rest still has to hold.
+    """
+    bools, unhandled = [], []
+    for c in ev.conditions:
+        if c.tag == "if_timer_finished":
+            continue
+        b = _cond_bool(em, c)
+        (bools.append(b) if b else unhandled.append(c))
+    return bools, unhandled
 
 
 _COMMAND_EMIT = {

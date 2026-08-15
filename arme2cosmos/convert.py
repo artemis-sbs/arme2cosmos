@@ -12,7 +12,9 @@ import re
 
 from .emit import (Emitter, emit_condition, _mast_str, _pyname, _cond_bool, _value,
                    _side_key, _DEFAULT_PLAYER_SIDE, _AI_OVERRIDES_DEFAULT,
-                   player_slot_name, _slot_int, _num_key, to_ascii)
+                   player_slot_name, _slot_int, _num_key, to_ascii,
+                   TIMER_PUSHED, TIMER_REPEATS, pushed_timer, timer_only_trigger,
+                   timer_guards)
 from .model import Mission
 from .parser import parse_file
 
@@ -508,6 +510,7 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     # (respawn-on-destroy, dock, flag-signal) so they don't poll; the rest stay loops.
     # a28_compatible skips routing entirely -- every event is a uniform polling task.
     respawn_events, dock_events, flag_events, loop_events = [], [], [], []
+    timer_events = []   # driven entirely by a timer signal -- no loop at all
     if event_model == "a28_compatible":
         loop_events = list(indep_events)
     else:
@@ -519,8 +522,21 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
                 dock_events.append(ev)
             elif _flag_signal(ev) is not None:
                 flag_events.append(ev)
+            elif _is_timer_route(em, ev):
+                timer_events.append(ev)
             else:
                 loop_events.append(ev)
+    # A one-shot timer with OTHER conditions on it cannot become a route -- the event may
+    # still be waiting on those long after the deadline. But it cannot fire BEFORE the
+    # deadline either, so its loop does not need to exist until then: the timer's signal
+    # starts it. Same loop, same conditions, just not resident from t=0.
+    deferred_loops = {i: em.timer_signal[pushed_timer(em, ev)]
+                      for i, ev in enumerate(loop_events)
+                      if pushed_timer(em, ev)
+                      and em.timer_verdict[pushed_timer(em, ev)] == "ONESHOT"}
+    # Everything else still awaits/polls its timer, so drop the signal it would not use.
+    _commit_timer_routes(em, [pushed_timer(em, ev) for ev in timer_events]
+                         + [pushed_timer(em, loop_events[i]) for i in deferred_loops])
     em.signal_flags = {_pyname(_flag_signal(ev).get("name")) for ev in flag_events}
     if dock_events:
         em.addons.add("docking")
@@ -529,6 +545,8 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
         "scene chain": len(seq_events), "polling loops": len(loop_events),
         "respawn routes": len(respawn_events), "dock routes": len(dock_events),
         "flag-signal routes": len(flag_events),
+        "timer-signal routes": len(timer_events),
+        "deferred loops (started by a timer)": len(deferred_loops),
         "player-respawn routes": len(respawn_player_events),
     }
 
@@ -549,9 +567,10 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
                      'get_mission_dir_filename("scans.amd"), data_parser=amd_scan_data))')
         lines.append("")
 
-    if loop_events or respawn_events:
+    resident = [i for i, _ev in enumerate(loop_events) if i not in deferred_loops]
+    if resident or respawn_events:
         lines.append("    # independent events: start polling loops + initial respawns")
-        for i, _ev in enumerate(loop_events):
+        for i in resident:
             lines.append(f"    task_schedule(ind_event_{i})")
         for j, _ev in enumerate(respawn_events):
             lines.append(f"    task_schedule(respawn_{j})")  # initial spawn (then routed)
@@ -612,6 +631,9 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
             lines.extend(em.emit_command(n))
         lines.append("    ->END")
         lines.append("")
+
+    # --- timer waits -> //shared/signal routes fired at the deadline (no polling) ---
+    lines.extend(_timer_route_lines(em, timer_events, deferred_loops))
 
     # --- remaining independent events -> continuous polling loops (re-fire each tick) ---
     for i, ev in enumerate(loop_events):
@@ -870,15 +892,160 @@ def _side_value_of(n, em: Emitter) -> int:
         return _DEFAULT_PLAYER_SIDE
 
 
-def _prescan_timers(mission: Mission, em: Emitter) -> None:
-    """Which timers the mission actually starts.
+def _timer_signal_names(names) -> dict[str, str]:
+    """2.8 timer name -> the signal it will emit, distinct for every name.
+
+    Two 2.8 names can slug to one identifier (``Wave-1`` and ``Wave_1``), and two timers
+    sharing a signal would fire each other's events. Sorted so the numbering is stable
+    across runs -- a converted mission that differs only by which timer won a race is
+    unreviewable.
+    """
+    out, used = {}, set()
+    for name in sorted(names):
+        base = f"a2x_timer_{_pyname(name).lower()}"
+        sig, i = base, 1
+        while sig in used:
+            i += 1
+            sig = f"{base}_{i}"
+        used.add(sig)
+        out[name] = sig
+    return out
+
+
+def _timer_seconds(n) -> float | None:
+    """A ``set_timer`` node's seconds as a number, or None if it is an expression."""
+    try:
+        return float((n.get("seconds") or "0").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _prescan_timer_model(mission: Mission, em: Emitter) -> None:
+    """Decide, once, what each timer IS -- and so what each arming site emits.
 
     ``is_timer_finished`` answers True for a timer that was never set, so a condition on a
     timer nothing starts is true from t=0. Knowing which names are real lets the emitters
-    tell "waiting for a timer" apart from "waiting for a timer that is never coming".
+    tell "waiting for a timer" apart from "waiting for a timer that is never coming"; that
+    is what ``em.timers_set`` has always carried.
+
+    On top of that, a timer can now ANNOUNCE its own deadline (``set_timer(signal=)`` /
+    ``set_interval``), which is the difference between a mission that runs one route at
+    the deadline and one that runs a resident 0.5s task from t=0. Whether a given timer
+    can is a property of how the WHOLE mission uses it, so it is decided here rather than
+    guessed at each arming site:
+
+    ``INTERVAL``       an event tests the timer and its own body re-arms it -- 2.8's
+                       "every N seconds" idiom, which is exactly ``set_interval``.
+    ``INTERVAL_RAMP``  the same, but the first wait differs from the repeat (a long
+                       lead-in, then a fast beat). Emitted as a self-re-arming
+                       ``set_timer(signal=)``, which mirrors 2.8 exactly.
+    ``ONESHOT``        armed from exactly one place and tested -- one signal at expiry.
+    ``POLL``           armed from several unrelated places; which arming is live at any
+                       moment is a runtime question, so it keeps polling.
+    ``DEAD``           armed but never tested. Nothing listens, so nothing is pushed.
+
+    The re-arm INSIDE an interval's own event body is dropped: ``set_interval`` keeps
+    beating by itself, and re-arming would restart the same clock every beat.
     """
-    em.timers_set = {n.get("name") for n in mission.all_nodes()
-                     if n.tag == "set_timer" and n.get("name")}
+    arms: dict[str, list] = {}
+    for n in mission.start:
+        if n.tag == "set_timer" and n.get("name"):
+            arms.setdefault(n.get("name"), []).append((n, None))
+    for ev in mission.events:
+        for n in ev.commands:
+            if n.tag == "set_timer" and n.get("name"):
+                arms.setdefault(n.get("name"), []).append((n, ev))
+    em.timers_set = set(arms)
+
+    tested: dict[str, list] = {}
+    for ev in mission.events:
+        for c in ev.conditions:
+            if c.tag == "if_timer_finished" and c.get("name"):
+                tested.setdefault(c.get("name"), []).append(ev)
+
+    signals = _timer_signal_names(arms)
+    for name, sites in arms.items():
+        listeners = tested.get(name, [])
+        # IDENTITY, not equality: Event is a plain dataclass, so two events that happen to
+        # carry the same name and nodes compare equal and would be treated as one.
+        listening = {id(ev) for ev in listeners}
+        # The re-arm(s) that belong to an event gated on this same timer -- 2.8's
+        # "every N seconds" loop, written as a condition plus a re-arm in the body.
+        rearms = [(n, ev) for n, ev in sites if ev is not None and id(ev) in listening]
+        rearmed = {id(n) for n, _ in rearms}
+        outside = [(n, ev) for n, ev in sites if id(n) not in rearmed]
+        if not listeners:
+            verdict = "DEAD"
+        elif rearms and outside:
+            first, repeat = _timer_seconds(outside[0][0]), _timer_seconds(rearms[0][0])
+            # An expression for either period is not something to reason about -- fall
+            # back to the plain interval rather than inventing a lead-in.
+            same = first is None or repeat is None or first == repeat
+            verdict = "INTERVAL" if same else "INTERVAL_RAMP"
+        elif rearms:
+            # Only ever armed from inside the loop it drives, so in 2.8 it never starts.
+            # Nothing to push; leave the existing behavior exactly as it was.
+            verdict = "POLL"
+        elif len(sites) == 1:
+            verdict = "ONESHOT"
+        else:
+            verdict = "POLL"
+
+        em.timer_verdict[name] = verdict
+        if verdict not in TIMER_PUSHED:
+            continue
+        sig = signals[name]
+        em.timer_signal[name] = sig
+        # The wait a listener sees: the repeat for an interval, the single arm otherwise.
+        beat = (rearms or outside or sites)[0][0]
+        em.timer_period[name] = (beat if verdict in TIMER_REPEATS else sites[0][0]).get(
+            "seconds", "0")
+        for n, _ev in outside:
+            em.timer_node_plan[id(n)] = {
+                "form": "interval" if verdict == "INTERVAL" else "signal", "signal": sig}
+        for n, _ev in rearms:
+            # INTERVAL re-arms are redundant; an INTERVAL_RAMP re-arms itself on purpose.
+            em.timer_node_plan[id(n)] = (
+                {"form": "drop", "signal": sig} if verdict == "INTERVAL"
+                else {"form": "signal", "signal": sig})
+    if any(v == "POLL" for v in em.timer_verdict.values()):
+        em.note("timers: some timers are armed from several unrelated places and keep "
+                "their polling loops -- which arming is live is a runtime question. "
+                "Give each use its own timer name to make them event-driven.")
+
+
+# Kept as the old name so callers that only want "which timers are real" still read well.
+_prescan_timers = _prescan_timer_model
+
+
+def _commit_timer_routes(em: Emitter, routed) -> None:
+    """Keep ``signal=`` only on the timers something actually listens to.
+
+    The prescan decides which timers COULD announce themselves; each target then decides
+    which of those it really routes -- a timer whose only listener sits in the sequential
+    scene chain is still awaited there, not routed. Arming a signal nobody handles is
+    harmless at runtime but it is a lie in the generated source, and a reader chasing
+    ``a2x_timer_foo`` would find no route.
+
+    Call this AFTER the event partition and BEFORE any command is emitted, with the 2.8
+    TIMER NAMES the target routed -- not the signal names. Passing the wrong one used to
+    match nothing, so every arm quietly lost its `signal=` while the routes that wanted it
+    stayed: a mission full of routes waiting on a signal nothing would ever emit, which
+    reads as "the conversion just stopped halfway" and costs a headless run to find. It is
+    an error now.
+    """
+    routed = set(routed)
+    unknown = routed - set(em.timer_verdict)
+    if unknown:
+        raise ValueError(f"_commit_timer_routes wants 2.8 timer names, got {sorted(unknown)!r}")
+    for name, verdict in list(em.timer_verdict.items()):
+        if verdict in TIMER_PUSHED and name not in routed:
+            em.timer_verdict[name] = "POLL"
+            em.timer_signal.pop(name, None)
+            em.timer_period.pop(name, None)
+    live = set(em.timer_signal.values())
+    em.timer_node_plan = {k: v for k, v in em.timer_node_plan.items()
+                          if v.get("signal") in live}
 
 
 def _prescan_named_objects(mission: Mission, em: Emitter) -> None:
@@ -1007,6 +1174,58 @@ def _classify_events(events):
         feeds_later = any(sets & needs_l[j] for j in range(i + 1, len(events)))
         (seq if (consumes_prior or feeds_later) else indep).append(ev)
     return seq, indep
+
+
+def _is_timer_route(em: Emitter, ev) -> bool:
+    """True if this event can be driven entirely by its timer's signal, with no loop.
+
+    Two shapes qualify. A timer that is the event's ONLY condition -- the deadline IS the
+    trigger, so the route body is the event. And any event on a REPEATING timer: the
+    interval comes round again, so re-checking the other conditions on each beat is the
+    same "keep trying" 2.8 does, only at the author's own period instead of twice a second.
+
+    A one-shot timer with other conditions is deliberately NOT here: it gets one signal
+    edge, and the event may still be waiting on the rest of its conditions when it lands.
+    Those keep a loop (started by the timer -- see ``deferred_loops``).
+    """
+    name = pushed_timer(em, ev)
+    if name is None:
+        return False
+    return len(ev.conditions) == 1 or em.timer_verdict[name] in TIMER_REPEATS
+
+
+def _timer_route_lines(em: Emitter, timer_events, deferred_loops) -> list[str]:
+    """The ``//shared/signal`` routes a mission's timers drive.
+
+    SHARED, not per-console: a 2.8 event body is server work -- it messages the crew, sets
+    variables, moves objects, arms timers. On a plain ``//signal`` every one of those would
+    happen once per connected console, and on a repeating timer once per console per beat.
+    """
+    out: list[str] = []
+    for ev in timer_events:
+        name = pushed_timer(em, ev)
+        sig, verdict = em.timer_signal[name], em.timer_verdict[name]
+        beat = "every {}s".format(em.timer_period[name]) if verdict in TIMER_REPEATS \
+            else "after {}s".format(em.timer_period[name])
+        out.append(f'//shared/signal/{sig}   # {ev.name} ("{name}" {beat})')
+        bools, unhandled = timer_guards(em, ev)
+        for c in unhandled:
+            out.append(f"    # when (verify by hand): {_xml_one(c)}")
+        if bools:
+            # The timer half is true by construction; the rest still has to hold. On a
+            # repeating timer a failed guard just waits for the next beat.
+            out.append(f"    ->END if not ({' and '.join(bools)})")
+        for n in ev.commands:
+            out.append(f"    # {_xml_one(n)}")
+            out.extend(em.emit_command(n))
+        out.append("    ->END")
+        out.append("")
+    for i, sig in sorted(deferred_loops.items()):
+        out.append(f"//shared/signal/{sig}   # deadline reached -> start ind_event_{i}")
+        out.append(f"    task_schedule(ind_event_{i})")
+        out.append("    ->END")
+        out.append("")
+    return out
 
 
 def _button_body(em: Emitter, ev, handler_tag: str) -> list[str]:

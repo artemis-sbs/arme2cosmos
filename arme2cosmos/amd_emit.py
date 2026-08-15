@@ -19,7 +19,8 @@ from __future__ import annotations
 import re
 
 from .emit import (Emitter, emit_condition, _cond_bool, _pyname, _mast_str, _value,
-                   _num_key, _phase_sig_name, _SIDE, _is_less, to_ascii)
+                   _num_key, _phase_sig_name, _SIDE, _is_less, to_ascii,
+                   TIMER_PUSHED, TIMER_REPEATS, timer_guards)
 from .model import Event, Mission, XmlNode
 
 # Keywords that classify an end-game decider event as a win or a loss (matched against
@@ -344,6 +345,13 @@ class AmdBuilder:
         # phase routes that reveal+start them. Keyed by (flag, vkey) -> (vraw, [(q,label)]).
         self.deferred_gates: set[str] = set()
         self.phase_routes: dict[tuple[str, str], tuple] = {}
+        # Watchers and beats a TIMER drives instead of a polling loop. Each value is
+        # {"mode": "route"|"defer", "signal": <signal>, "timer": <2.8 timer name>}:
+        #   route -- the loop is replaced outright
+        #   defer -- the loop still exists, but only from the deadline onward
+        # The 2.8 name rides along because _commit_timer_routes is keyed by it.
+        self.timer_gates: dict[str, dict] = {}
+        self.timer_beats: dict[int, dict] = {}   # index into self.beats
 
     def _add_role(self, var: str, role: str) -> None:
         if (var, role) not in self.roles:
@@ -485,6 +493,7 @@ class AmdBuilder:
                 or self._story_beat_quest(ev, used_ids, terminal)
             (self.quests.append(q) if q is not None else self.beats.append(ev))
         self._wire_reveal_graph()  # defer phase-gated watchers until their phase is reached
+        self._plan_timer_gates()   # ...and hand the rest of the timed ones to their timer
         self._aggregate_kills(used_ids)  # roll per-ship kills under one Parent quest
         # AFTER the reveal graph (it fills phase_routes, whose reveal lists must be
         # re-keyed) and AFTER kill aggregation (so the synthetic fleet parent is grouped
@@ -535,6 +544,51 @@ class AmdBuilder:
             self.em.phase_signals.add(key)
             vraw2, items = self.phase_routes.setdefault(key, (vraw, []))
             items.append((q.key, q.gate_label))    # gate_label is None for a story beat
+
+    def _timer_drive(self, conds) -> tuple[str, str] | None:
+        """How a timer can drive this set of conditions, or None if it cannot.
+
+        ``("route", sig)`` -- the timer's signal replaces the polling loop outright. Sound
+        when the timer is the ONLY condition (the deadline is the whole trigger), or when
+        it REPEATS (a guard that is false on one beat gets another beat, which is the same
+        "keep trying" the 0.5s loop was doing, at the author's own period).
+
+        ``("defer", sig)`` -- a one-shot timer with other conditions still on it. It gets
+        one signal edge and the rest may not be true yet, so the loop has to stay; but the
+        event cannot fire before the deadline either, so the loop need not exist until
+        then. Exactly equivalent, minus every tick before the deadline.
+        """
+        timers = [c for c in conds if c.tag == "if_timer_finished"]
+        if len(timers) != 1:
+            return None   # no clock, or two of them and no way to say which starts it
+        name = timers[0].get("name")
+        verdict = self.em.timer_verdict.get(name)
+        if verdict not in TIMER_PUSHED:
+            return None
+        sig = self.em.timer_signal[name]
+        mode = "route" if (len(conds) == 1 or verdict in TIMER_REPEATS) else "defer"
+        return {"mode": mode, "signal": sig, "timer": name}
+
+    def _plan_timer_gates(self) -> None:
+        """Hand every timer-gated watcher and background beat to its timer.
+
+        Runs AFTER the reveal graph on purpose. A phase-deferred quest is SECRET until its
+        phase is reached, and a secret quest's triggers are off -- so a one-shot timer
+        firing while it is still secret would be dropped and never come again. The phase
+        route already got that watcher off the from-t=0 schedule, which was the point, so
+        the two mechanisms do not need to compete: whoever deferred it first keeps it.
+        """
+        for label, conds in self.watchers:
+            if label in self.deferred_gates:
+                continue
+            plan = self._timer_drive(conds)
+            if plan:
+                self.timer_gates[label] = plan
+                self.deferred_gates.add(label)
+        for i, ev in enumerate(self.beats):
+            plan = self._timer_drive(ev.conditions)
+            if plan:
+                self.timer_beats[i] = plan
 
     def _aggregate_kills(self, used_ids: set) -> None:
         """Roll the per-ship ``Goal: destroy 1 <role>`` objectives under one synthetic
@@ -1172,6 +1226,7 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     from .convert import (_slug, _display_name, _prescan_named_objects,
                           build_script_py, build_story_json, build_description_yaml,
                           build_notes, build_button_route, build_gm_tree_routes, _prescan_timers,
+                          _commit_timer_routes,
                           is_player_respawn_event, build_player_respawn_routes,
                           redundant_gm_key_events, gm_key_label)
 
@@ -1234,6 +1289,10 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
 
     builder = AmdBuilder(mission, em, plain_events)
     builder.build()
+    # Only the timers something actually routes keep their `signal=`; the rest are still
+    # awaited/polled and arming a signal nobody handles would be a lie in the source.
+    _commit_timer_routes(em, [p["timer"] for p in builder.timer_gates.values()]
+                         + [p["timer"] for p in builder.timer_beats.values()])
 
     story_amd = "\n\n".join(q.render() for q in builder.quests) + "\n"
     story_mast = _build_story_mast(mission, em, builder, _slug, _display_name)
@@ -1381,12 +1440,15 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     L.append("")
 
     active_watchers = [gl for gl, _c in builder.watchers if gl not in builder.deferred_gates]
-    if active_watchers or builder.beats:
+    # A timer-driven beat is started by its timer, whether the timer replaced its loop
+    # ("route") or merely holds it back until the deadline ("defer").
+    active_beats = [i for i, _ev in enumerate(builder.beats) if i not in builder.timer_beats]
+    if active_watchers or active_beats:
         L.append("    # --- start non-deferred watchers + background beats "
-                 f"({len(builder.deferred_gates)} watcher(s) deferred to phase routes) ---")
+                 f"({len(builder.deferred_gates)} watcher(s) deferred to a phase or a timer) ---")
         for gl in active_watchers:
             L.append(f"    task_schedule({gl})")
-        for i, _ev in enumerate(builder.beats):
+        for i in active_beats:
             L.append(f"    task_schedule(beat_{i})")
         L.append("")
     L.append("    ->END")
@@ -1414,6 +1476,8 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     # on_signal via //shared/signal/quest_signal reading SIGNAL_NAME -- so the trigger
     # is signal_emit("quest_signal", {SIGNAL_NAME: ...}), NOT a bare signal_emit.
     for gl, conds in builder.watchers:
+        if builder.timer_gates.get(gl, {}).get("mode") == "route":
+            continue   # its timer emits the quest signal directly -- see below
         L.append(f"=== {gl}   # escape hatch -> quest_signal a2x_{gl}")
         bools = [b for b in (_cond_bool(em, c) for c in conds) if b]
         L.append(f"---{gl}_loop")
@@ -1421,6 +1485,30 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
         if bools:
             L.append(f"    jump {gl}_loop if not ({' and '.join(bools)})")
         L.append(f'    signal_emit("quest_signal", {{"SIGNAL_NAME": "a2x_{gl}"}})')
+        L.append("    ->END")
+        L.append("")
+
+    # ...and the timed ones, which the engine pushes at the deadline instead.
+    #
+    # SHARED, not per-console: advancing a quest is server work, and on a plain //signal
+    # every connected console would advance it again. The quest driver dispatches
+    # `Starts when: signal X` through //shared/signal/quest_signal reading SIGNAL_NAME,
+    # so the trigger is that emit, not a bare signal_emit(X).
+    for gl, conds in builder.watchers:
+        plan = builder.timer_gates.get(gl)
+        if plan is None:
+            continue
+        mode, tsig = plan["mode"], plan["signal"]
+        if mode == "defer":
+            L.append(f"//shared/signal/{tsig}   # deadline reached -> start {gl}")
+            L.append(f"    task_schedule({gl})")
+        else:
+            L.append(f"//shared/signal/{tsig}   # was {gl}: the deadline IS the trigger")
+            guards = [b for b in (_cond_bool(em, c) for c in conds
+                                  if c.tag != "if_timer_finished") if b]
+            if guards:
+                L.append(f"    ->END if not ({' and '.join(guards)})")
+            L.append(f'    signal_emit("quest_signal", {{"SIGNAL_NAME": "a2x_{gl}"}})')
         L.append("    ->END")
         L.append("")
 
@@ -1447,6 +1535,27 @@ def _build_story_mast(mission, em, builder, _slug, _display_name) -> str:
     # background narrative beats: leftover events kept as re-firing polling loops
     # (timed comms beats etc. -- no AMD verb; see docs/amd_target.md).
     for i, ev in enumerate(builder.beats):
+        plan = builder.timer_beats.get(i) or {}
+        mode, tsig = plan.get("mode"), plan.get("signal")
+        if mode == "route":
+            # The timer IS the beat: no loop, one route the engine fires at the deadline.
+            L.append(f"//shared/signal/{tsig}   # {ev.name} (was beat_{i})")
+            bools, unhandled = timer_guards(em, ev)
+            for c in unhandled:
+                L.append(f"    # when (verify by hand): {_xml_one(c)}")
+            if bools:
+                L.append(f"    ->END if not ({' and '.join(bools)})")
+            for n in ev.commands:
+                L.append(f"    # {_xml_one(n)}")
+                L.extend(em.emit_command(n))
+            L.append("    ->END")
+            L.append("")
+            continue
+        if mode == "defer":
+            L.append(f"//shared/signal/{tsig}   # deadline reached -> start beat_{i}")
+            L.append(f"    task_schedule(beat_{i})")
+            L.append("    ->END")
+            L.append("")
         L.append(f"=== beat_{i}   # {ev.name}")
         bools, unhandled = [], []
         for c in ev.conditions:

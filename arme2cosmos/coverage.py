@@ -54,7 +54,8 @@ _COMMANDS = {
     "destroy": Coverage(FULL, ".delete_object()"),
     "destroy_near": Coverage(FULL, "query + loop delete"),
     "set_variable": Coverage(FULL, "x = ... / shared x = ..."),
-    "set_timer": Coverage(FULL, "set_timer(0, name, seconds=...)"),
+    "set_timer": Coverage(FULL, "set_timer(signal=) / set_interval() where something "
+                          "listens; plain set_timer otherwise"),
     "set_difficulty_level": Coverage(FULL, "DIFFICULTY assignment"),
     "set_skybox_index": Coverage(FULL, "a2x_set_skybox_index -> LM basic_random_skybox labels (index % N)"),
     "log": Coverage(FULL, "log(text)"),
@@ -98,7 +99,8 @@ _COMMANDS = {
 
 # --- conditions -------------------------------------------------------------
 _CONDITIONS = {
-    "if_timer_finished": Coverage(FULL, "is_timer_finished(0, name)"),
+    "if_timer_finished": Coverage(FULL, "a //shared/signal route the timer pushes; "
+                                 "is_timer_set_and_finished() where it still polls"),
     "if_exists": Coverage(FULL, "object_exists(id)"),
     "if_not_exists": Coverage(FULL, "not object_exists(id)"),
     "if_variable": Coverage(FULL, "plain python if"),
