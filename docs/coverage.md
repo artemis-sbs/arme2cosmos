@@ -29,7 +29,7 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | 2.8 command | Status | Cosmos / notes |
 |---|---|---|
 | `create` player/enemy/neutral/station | **DONE** | `a2x_create_*` (coords flipped; named objects captured) |
-| `create` monster / whale | **DONE** | `a2x_create_monster` (real art for classic/derelict, placeholder + `creature_*` role otherwise) |
+| `create` monster / whale | **DONE** | types 1/2/3/4/6 -> LM prefab (grazer/shark/dragon/piranha/insect) with the 2.8 name as `name`; any non-grazer turns `MONSTER_NON_TYPHON: true` on in `settings.yaml` (LM gates those prefabs on it, default off, so they spawned nothing). Other types, or a monster referenced later: `a2x_create_monster` (real art for classic/derelict, placeholder + `creature_*` role otherwise) |
 | `create` genericMesh | **DONE** | `a2x_create_generic` (placeholder art; raw `.dxs` mesh has no Cosmos equivalent) |
 | `create` blackHole / Anomaly | **DONE** | `prefab_black_hole` / `a2x_create_anomaly` |
 | `create` nebulas/asteroids/mines | **DONE** | `a2x_create_*` (sphere/line, random_range, seed) |
@@ -50,10 +50,10 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `sideValue` (on `create`) | **DONE** | one Cosmos side per distinct 2.8 sideValue (`a2x_declare_sides`, emitted into `//shared/signal/create_sides`) -- see *Sides and diplomacy* below |
 | `set_special` (ability) | **DONE** | all 14 abilities -> LM elite system (engine flags + scripted `elite/*` roles via `handle_elite_abilities`); no-name calls target `COMMS_SELECTED_ID` |
 | `set_special` (ship/captain) | **DONE** | captain personality (cowardly/brave/bombastic/seething/duplicitous/exceptional) -> `a2x_set_captain` (LM surrender/taunt/fleets driver); ship power tier -> `a2x_set_ship_power` (shield/beam/tube coeffs) |
-| `set_comms_button` (+ `if_comms_button`) | **DONE** | a `//comms` route with `+ "label":` buttons |
+| `set_comms_button` / `clear_comms_button` (+ `if_comms_button`) | **DONE** | a `//comms` route of `+ "label" if a2x_comms_button_visible("label", COMMS_ORIGIN_ID):` buttons. `a2x_set_comms_button` / `a2x_clear_comms_button` keep 2.8's per-sideValue offer state (0 = every side) in shared inventory and refresh any open comms menu (`comms_refresh_open`), so a button appears when the mission offers it and is gone once cleared -- 1369 corpus handlers clear their own button (one-shot). EVERY handler event for a text is emitted, each under its own conditions as a live `if` (153 buttons have several; only the first used to run). A condition with no live form stays `# guard (verify by hand)` and that handler runs unguarded. A `:` in the label is written `\x3a` inside the condition (the button rule's `if` stops at the first colon) |
 | `set_gm_button` (+ `if_gm_button`) | **DONE** | a gamemaster-gated `//comms/gm/...` **tree** (slash = submenu) |
 | `set_monster_tag_data` / `set_named_object_tag_state` | **PARTIAL** | stored as inventory values; the tagging *gameplay* needs a tag-torpedo + `//damage` route (note emitted) |
-| `end_mission` | **DONE** | `signal_emit("show_game_results")` |
+| `end_mission` | **DONE** | `GAME_STARTED = False`, `GAME_ENDED = True`, `signal_emit("show_game_results")` (LM's own ending). Plus `music_play_sting("victory"/"failure")` when the outcome is clear -- from the terminal event's own text, else from every event that sets its end flag agreeing (same classifier as the AMD target's Win:/Lose:). Ambiguous endings get no sting |
 | `set_skybox_index` | **DONE** | `a2x_set_skybox_index` -> the LM `basic_random_skybox` media labels (2.8 SB00..SB29 index mapped across them) |
 | `get_object_property` / `if_object_property` | **DONE** | `a2x_object_property(obj, prop)` reads any mapped prop back |
 | `set_fleet_property` | **DONE** | fleetSpacing/fleetMaxRadius -> `a2x_set_fleet_property` -> the general `fleet_spacing`/`fleet_max_radius` formation-ring keys the LM scatter brain reads |
@@ -80,8 +80,8 @@ the rest · TODO = not yet wired · NO-EQUIV = no Cosmos equivalent (stays `# TO
 | `if_variable` | **DONE** | live boolean guard (loops) / `//signal/a2x_flag_F` route (sole `==`) |
 | `if_difficulty` | **DONE** | live `DIFFICULTY <op> v` boolean (in polling loops) |
 | `if_monster_tag_matches` / `if_object_tag_matches` | **PARTIAL** | inventory guard (tagging gameplay TODO) |
-| `if_comms_button` / `if_gm_button` | **DONE** | handled structurally (become route buttons) |
-| `if_object_property` | **PARTIAL** | mapped props (`_AUTO_PROPS`) -> live `a2x_object_property(obj, prop) <op> val` boolean (loops + one-shot poll); unmapped props stay a `# when (verify by hand)` comment. Corpus: ~48% of occurrences now evaluate for real |
+| `if_comms_button` / `if_gm_button` | **DONE** | handled structurally (become route buttons); the handler's other conditions are live `if` guards in the button body |
+| `if_object_property` | **PARTIAL** | mapped props (`_AUTO_PROPS`) -> live `a2x_object_property(obj, prop) <op> val` boolean (loops + one-shot poll); `sideValue`/`SideValue` read back through `a2x.sides.side_value` (the inverse of `a2x_set_side_value`; conquest_pvp2's capture mechanic); unmapped props stay a `# when (verify by hand)` comment. Corpus (MAST target, 2026-09-18): 453 evaluate live, 0 left by hand outside comms-button guards |
 | `if_scan_level` / `if_in_nebula` / `if_damcon_members` / `if_player_is_targeting` | TODO | emitted as a `# when (verify by hand)` comment |
 | `if_gm_key` / `if_client_key` | TODO | key handlers |
 
@@ -193,8 +193,16 @@ event -- and the roster fill below is skipped entirely for such a mission.
 2.8 always started with eight crewable ships while a mission usually positions only the
 slots it cares about, so the route fills the rest from `_DEFAULT_PLAYER_LIST` (LM's names
 and hulls) and marks them `a2x_spare_player`. All eight exist for ship select;
-`//shared/signal/game_started` then deletes the spares, leaving the ships the mission
-declared (or Artemis alone if it declared none). Deliberately **not** via `spawn_players`,
+`//shared/signal/game_started` then **parks** the spares (`a2x_park_spare_players`:
+standby via the player roster, never `delete_object` -- deleting a player ship under live
+consoles is the ObjectDataBlob use-after-free), leaving the ships the mission declared (or
+Artemis alone if it declared none). A spare a connected console is crewing is kept.
+
+Consoles bind to player **roster records**, not ship objects. These ships are made with
+`slot=` (so `player_ensure` stamps them) and nothing seeds a roster, so the library's
+`player_roster_adopt` (run by LM's server console after `create_player_ships`) records a
+stamped ship at its own slot. Before sbs_utils learned that, every conversion had eight
+ships and an empty picker. Deliberately **not** via `spawn_players`,
 which repositions ships near a friendly station and would discard the 2.8 coordinates.
 
 Because the route assigns `player_ship` before the map loads, the map's forward

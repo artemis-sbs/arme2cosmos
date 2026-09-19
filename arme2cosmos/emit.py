@@ -9,6 +9,7 @@ internally); everything not mechanically translatable is emitted as a
 
 from __future__ import annotations
 
+import keyword
 import re
 import unicodedata
 
@@ -257,6 +258,9 @@ class Emitter:
         # Cosmos SETTINGS the conversion needs turned on (written to settings.yaml, which
         # settings_get_defaults merges over the built-ins). Only written when non-empty.
         self.settings: dict[str, object] = {}
+        # id(end_mission node) -> "win" / "lose", decided mission-wide before emitting
+        # (convert._prescan_end_outcomes) because the terminal event rarely says which.
+        self.end_outcomes: dict[int, str] = {}
 
     def _art(self, n: XmlNode, default: str) -> str:
         """Resolve a Cosmos art key from the hullmap (2.8 hullID/raceKeys/hullKeys),
@@ -479,7 +483,13 @@ class Emitter:
         # capturable object id, so referenced monsters keep the capturable placeholder path.
         if prefab and (not name or name not in self.referenced_names):
             self.addons.add("prefabs")
-            nm = f', "NAME": "{_mast_str(name)}"' if name else ""
+            if prefab != "grazer":
+                # LM gates every non-Typhon creature prefab (all but the grazer) on this
+                # setting and defaults it OFF, so without it the prefab yields 0 and the
+                # 2.8 monster simply never appears.
+                self.settings["MONSTER_NON_TYPHON"] = True
+            # Lowercase `name`: the key the creature prefabs read (their metadata default).
+            nm = f', "name": "{_mast_str(name)}"' if name else ""
             return [f'    prefab_spawn(prefab_{prefab}, {{"START_X": a2x_pos({x}, {y}, {z}).x, '
                     f'"START_Y": a2x_pos({x}, {y}, {z}).y, '
                     f'"START_Z": a2x_pos({x}, {y}, {z}).z{nm}}})']
@@ -813,15 +823,24 @@ class Emitter:
         return [f'    a2x_warning_popup({", ".join(args)})']
 
     def c_set_comms_button(self, n: XmlNode) -> list[str]:
-        # The button itself lives in the generated //comms route; this command just
-        # marks when 2.8 made it appear. Keep as a breadcrumb.
+        # The button itself lives in the generated //comms route, gated on the state this
+        # sets -- so it appears when 2.8 offered it, not from t=0.
         self.addons.add("comms")
-        return [f'    # set_comms_button "{n.get("text","")}" '
-                f'(button is in the //comms route below)']
+        return [f'    a2x_set_comms_button("{_mast_str(n.get("text", ""))}"{self._button_side(n)})']
 
     def c_clear_comms_button(self, n: XmlNode) -> list[str]:
-        return [f'    # clear_comms_button "{n.get("text","")}" '
-                f'(consider gating the //comms button with a flag)']
+        return [f'    a2x_clear_comms_button("{_mast_str(n.get("text", ""))}"{self._button_side(n)})']
+
+    @staticmethod
+    def _button_side(n: XmlNode) -> str:
+        """The 2.8 sideValue a comms button is scoped to, as an extra argument; nothing
+        for 0 / absent, which means every side."""
+        raw = (n.get("sideValue") or n.get("SideValue") or "").strip()
+        try:
+            sv = int(float(raw))
+        except ValueError:
+            return ""
+        return f", {sv}" if sv else ""
 
     def c_set_gm_button(self, n: XmlNode) -> list[str]:
         self.addons.update({"gamemaster", "gamemaster_comms"})
@@ -1047,7 +1066,15 @@ class Emitter:
         return [f'    a2x_incoming_message("{frm}", "{fn}")']
 
     def c_end_mission(self, n: XmlNode) -> list[str]:
-        return ['    signal_emit("show_game_results")', "    ->END"]
+        # LegendaryMissions' own ending (maps/game_objectives.mast): the game is over, and
+        # the selected music bank plays its sting. Only when the outcome is known -- a
+        # guessed "victory" over a lost mission is worse than silence.
+        out = ["    shared GAME_STARTED = False", "    shared GAME_ENDED = True"]
+        outcome = self.end_outcomes.get(id(n))
+        if outcome in ("win", "lose"):
+            sting = "victory" if outcome == "win" else "failure"
+            out.append(f'    music_play_sting("{sting}")')
+        return out + ['    signal_emit("show_game_results")', "    ->END"]
 
 
 def _xml_repr(n: XmlNode) -> str:
@@ -1167,6 +1194,23 @@ _GENERATED_LABEL = re.compile(
     r"|wait_[a-z]+_\d+$|wait_dock_\d+$")
 
 
+# Names a 2.8 variable must not take verbatim. MAST's own globals table (the core, not
+# the ~2300 procedural functions -- those are snake_case phrases no 2.8 author writes),
+# the MAST scope keywords (`shared x = 1` with x == "shared" assigns to NOTHING), `END`,
+# and Python's keywords. A hit is a COMPILE error (`ns-mast-var-collision`), and a story
+# that does not compile has zero labels -- the whole mission silently never starts.
+# Copied rather than imported: the tool is stdlib-only (see CLAUDE.md).
+_RESERVED_NAMES = frozenset({
+    "CRITICAL", "DEBUG", "ERROR", "INFO", "WARNING", "MastDataObject", "abs", "bool",
+    "data_dir", "debug_print", "dict", "dir", "enumerate", "faces", "filter", "float",
+    "hex", "import_python_module", "int", "isinstance", "iter", "itertools", "json",
+    "len", "list", "map", "math", "max", "min", "mission_dir", "next", "print", "random",
+    "range", "reversed", "scatter", "set", "sim", "sorted", "str", "tuple", "zip",
+    "version_get", "version_get_build", "version_get_major", "version_get_minor",
+    "shared", "assigned", "client", "temp", "default", "END", "log", "sbs",
+}) | frozenset(keyword.kwlist) | frozenset(keyword.softkwlist)
+
+
 def _pyname(name: str) -> str:
     """A 2.8 variable name -> a safe MAST/python identifier.
 
@@ -1179,7 +1223,7 @@ def _pyname(name: str) -> str:
     if out and out[0].isdigit():
         out = "_" + out
     out = out or "var"
-    if _GENERATED_LABEL.match(out):
+    if _GENERATED_LABEL.match(out) or out in _RESERVED_NAMES:
         out += "_"
     return out
 
@@ -1564,7 +1608,10 @@ def _cond_bool(em: Emitter, n: XmlNode) -> str | None:
         # table). Only the confirmed props (_AUTO_PROPS) become a live boolean; the rest
         # stay unexpressible (-> verify-by-hand comment / not an AMD escape-hatch trigger).
         prop = n.get("property")
-        if prop in _AUTO_PROPS:
+        # sideValue reads back through a2x.sides (the inverse of a2x_set_side_value) --
+        # conquest_pvp2's whole capture mechanic is this test. Not in _AUTO_PROPS: the
+        # setter has its own path, and addto/copy of a side number means nothing.
+        if prop in _AUTO_PROPS or prop in ("sideValue", "SideValue"):
             o = _resolve_obj(em, n.get("name"), n.get("player_slot"))
             op = _CMP_OP.get((n.get("comparator", "") or "").strip().upper(), "==")
             # `or 0` guards a gone object (a2x_object_property -> None) so the compare

@@ -211,10 +211,14 @@ def _quest_role(name: str) -> str:
     across the reference corpus (Nimbus, Archimedes, Nautilus, Nemesis, Rendevous), in
     six missions.
 
-    No token resolves BACK to a role ending in a lone `s`, so the fix has to be in the
-    role: a name that would be mangled gets an explicit `_target` suffix. That reads as
-    itself in both files, and -- unlike emitting the mangled `archimede` -- it is not
-    something a human reading story.amd will "correct" straight back into a broken one.
+    The reader has since learned English plurals (`amd_quest._singular`: `-ies` -> `-y`,
+    `-xes`/`-ches` lose `es`, and `-ss`/`-us`/`-is` are left alone), so `Nautilus` and
+    `Nemesis` would survive today -- but `Archimedes` still becomes `archimede`, and a
+    mission has to run against older libraries too. So the
+    fix stays in the role: any name ending in a lone `s` gets an explicit `_target`
+    suffix. That reads as itself in both files under either reader, and -- unlike
+    emitting the mangled `archimede` -- it is not something a human reading story.amd
+    will "correct" straight back into a broken one.
     """
     role = _pyname(name).lower()
     if role.endswith("s") and not role.endswith("ss"):
@@ -1255,7 +1259,7 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     # builders) -- exactly as convert.build_story_mast does. Only the remaining "plain"
     # events become quests/beats, so button trees don't degrade into polling loops.
     _dupe_gm_keys = redundant_gm_key_events(mission)
-    comms_btn_events: dict[str, object] = {}
+    comms_btn_events: dict[str, list] = {}
     gm_btn_events: dict[str, object] = {}
     respawn_player_events = []
     plain_events = []
@@ -1274,7 +1278,9 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
         # Otherwise they become polling beats referencing an undefined COMMS_SELECTED_ID.
         uses_gm_sel = any(n.get("use_gm_selection") is not None for n in ev.commands)
         if cb is not None:
-            comms_btn_events.setdefault(cb.get("text", ""), ev)
+            # EVERY handler for the text, not just the first: 2.8 fires each event whose
+            # conditions hold (153 corpus buttons have several, split by flag or side).
+            comms_btn_events.setdefault(cb.get("text", ""), []).append(ev)
         elif gb is not None:
             gm_btn_events.setdefault(gb.get("text", ""), ev)
         elif gk is not None:
@@ -1300,7 +1306,7 @@ def build_amd_target(mission: Mission, em: Emitter, lib_version: str) -> dict[st
     routes = build_button_route(
         mission, em, comms_btn_events, set_tag="set_comms_button",
         header="//comms", handler_tag="if_comms_button",
-        comment="# 2.8 comms buttons -> a //comms route (refine the gating/selection).",
+        comment="# 2.8 comms buttons -> a //comms route. Each shows only while set (a2x_set/clear_comms_button).",
         addons=["comms"])
     routes += build_gm_tree_routes(mission, em, gm_btn_events)
     routes += build_player_respawn_routes(respawn_player_events, em)

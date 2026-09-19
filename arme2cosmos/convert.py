@@ -98,7 +98,7 @@ _PLAYER_FILL_ORIGIN = (50000, 0, 50000)
 _MAP_MIN, _MAP_MAX = 0, 100000
 
 # Role marking a spawned player ship the mission did not ask for. All eight exist at
-# console-select so the crew can pick a hull; game_started then deletes the spares, so
+# console-select so the crew can pick a hull; game_started then PARKS the spares, so
 # play starts with exactly the ships the mission declared (or Artemis alone).
 _SPARE_PLAYER_ROLE = "a2x_spare_player"
 
@@ -170,7 +170,7 @@ def _player_fill_lines(em: Emitter, players: list, mission: Mission | None = Non
     step = _PLAYER_FILL_SPACING if (_MAP_MAX - bz) >= (bz - _MAP_MIN) else -_PLAYER_FILL_SPACING
     out = [f"    # 2.8 always started with {len(_DEFAULT_PLAYER_LIST)} crewable ships; this mission "
            f"positions {len(players)}.",
-           f"    # All {len(_DEFAULT_PLAYER_LIST)} exist for ship select; game_started deletes the",
+           f"    # All {len(_DEFAULT_PLAYER_LIST)} exist for ship select; game_started parks the",
            f"    # spares, leaving the {keep} the mission actually declared. Spawned on the",
            "    # mission's OWN player side -- PLAYER_CREATE_DEFAULT would use \"tsn\", a side",
            "    # this mission never declares, so its diplomacy would be empty."]
@@ -456,7 +456,7 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     # Comms/GM button-handler events become //comms buttons (GM ones gated to the GM
     # console), not linear-chain labels.
     _dupe_gm_keys = redundant_gm_key_events(mission)
-    comms_btn_events: dict[str, object] = {}
+    comms_btn_events: dict[str, list] = {}
     gm_btn_events: dict[str, object] = {}
     respawn_player_events = []
     plain_events = []
@@ -476,7 +476,9 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
         # beat referencing an undefined COMMS_SELECTED_ID.
         uses_gm_sel = any(n.get("use_gm_selection") is not None for n in ev.commands)
         if cb is not None:
-            comms_btn_events.setdefault(cb.get("text", ""), ev)
+            # EVERY handler for the text, not just the first: 2.8 fires each event whose
+            # conditions hold (153 corpus buttons have several, split by flag or side).
+            comms_btn_events.setdefault(cb.get("text", ""), []).append(ev)
         elif gb is not None:
             gm_btn_events.setdefault(gb.get("text", ""), ev)
         elif gk is not None:
@@ -663,7 +665,7 @@ def build_story_mast(mission: Mission, em: Emitter, event_model: str = "hybrid")
     lines.extend(build_button_route(
         mission, em, comms_btn_events, set_tag="set_comms_button",
         header="//comms", handler_tag="if_comms_button",
-        comment="# 2.8 comms buttons -> a //comms route (refine the gating/selection).",
+        comment="# 2.8 comms buttons -> a //comms route. Each shows only while set (a2x_set/clear_comms_button).",
         addons=["comms"]))
     lines.extend(build_gm_tree_routes(mission, em, gm_btn_events))
     if em.hails:  # 2.8 set_ship_text hailtext -> a Hail comms button (per-ship stored hail)
@@ -736,12 +738,15 @@ def _game_started_lines(mission: Mission, em: Emitter) -> list[str]:
         # LegendaryMissions crew-select / loadout machinery treats them as the game's
         # player ships. Deliberately NOT via spawn_players: that also repositions ships
         # near a friendly station, which would throw away the 2.8 spawn coordinates.
-        out += [f"    # Ship select is over: drop the spare hulls, leaving the ships the",
+        out += [f"    # Ship select is over: park the spare hulls, leaving the ships the",
                 f"    # mission declared. a2x_create_player already tagged every player ship",
                 f"    # default_player_ship at creation, so LM's crew-select / loadout",
                 f"    # machinery sees them without spawn_players (which would reposition",
                 f"    # them and discard the 2.8 spawn coordinates).",
-                f'    delete_object(role("{_SPARE_PLAYER_ROLE}"))']
+                f'    # PARKED (standby), never deleted: deleting a player ship while consoles',
+                f'    # are live is the ObjectDataBlob use-after-free, and a spare may be the',
+                f'    # ship a crew picked -- a crewed spare is kept.',
+                f'    a2x_park_spare_players("{_SPARE_PLAYER_ROLE}")']
     for n in nodes:
         out.append(f"    # {_xml_one(n)}")
         out.extend(em.emit_command(n))
@@ -1229,25 +1234,48 @@ def _timer_route_lines(em: Emitter, timer_events, deferred_loops) -> list[str]:
 
 
 def _button_body(em: Emitter, ev, handler_tag: str) -> list[str]:
-    """The inline body (8-space indented) for a `+ "label":` button."""
+    """The inline body (8-space indented) for a `+ "label":` button.
+
+    ``ev`` is one handler event, a LIST of them (a 2.8 comms button can have several --
+    each fires only when its own conditions hold), or None.
+
+    An event's other conditions (the `if_variable` flag a one-shot button checks, a
+    docking or distance test) are its GUARD: in 2.8 the press does nothing unless they
+    hold. They used to be emitted as comments, so the body always ran. Each is now a live
+    `if`; a condition with no live form stays a verify-by-hand comment, and the body then
+    runs unguarded as before rather than never.
+    """
+    events = [] if ev is None else (list(ev) if isinstance(ev, (list, tuple)) else [ev])
     body: list[str] = []
-    if ev is None:
+    if not events:
         # A 2.8 button declared with no handler event is a genuine no-op button; keep it as
         # a clean GM comms-tree item (not a TODO -- there is nothing to wire).
         body.append(f"        # 2.8 button declared with no {handler_tag} handler -- no-op")
         body.append("        ~~ pass ~~")
-    else:
-        for c in ev.conditions:
-            if c.tag != handler_tag:
-                body.append(f"        # guard: {_xml_one(c)}")
-        for n in ev.commands:
-            body.append(f"        # {_xml_one(n)}")
+        return body
+    for e in events:
+        guards, unhandled = [], []
+        for c in e.conditions:
+            if c.tag == handler_tag:
+                continue
+            b = _cond_bool(em, c)
+            (guards if b else unhandled).append(b or c)
+        if len(events) > 1:
+            body.append(f"        # event: {to_ascii(e.name or '?')}")
+        for c in unhandled:
+            body.append(f"        # guard (verify by hand): {_xml_one(c)}")
+        if guards:
+            body.append(f"        if {' and '.join(f'({g})' for g in guards)}:")
+        lines: list[str] = []
+        for n in e.commands:
+            lines.append(f"        # {_xml_one(n)}")
             for ln in em.emit_command(n):
-                body.append(("    " + ln) if ln.strip() else ln)
-    # A `+ "..":` block needs at least one real statement; an all-comment body is an
-    # empty block to MAST.
-    if not any(ln.strip() and not ln.strip().startswith("#") for ln in body):
-        body.append("        ~~ pass ~~")
+                lines.append(("    " + ln) if ln.strip() else ln)
+        if not any(ln.strip() and not ln.strip().startswith("#") for ln in lines):
+            lines.append("        ~~ pass ~~")
+        if guards:
+            lines = [("    " + ln) if ln.strip() else ln for ln in lines]
+        body += lines
     return body
 
 
@@ -1381,7 +1409,18 @@ def build_button_route(mission: Mission, em: Emitter, button_events: dict, *,
         em.addons.add(a)
     out = ["", comment, header]
     for t in texts:
-        out.append(f'    + "{_mast_str(t)}":')
+        if t in declared and set_tag == "set_comms_button":
+            # Shown only while 2.8 would show it: between its set_comms_button and a
+            # clear_comms_button, for the pressing ship's side (a2x keeps that state).
+            # The button rule's `if` expression stops at the first `:` (IF_EXP_REGEX), so a
+            # colon in the text ("Dispatch Security to:") would end the condition inside
+            # its own string literal -- a compile error, and a story with zero labels.
+            # Python reads \x3a back as ':'.
+            key = _mast_str(t).replace(":", "\\x3a")
+            out.append(f'    + "{_mast_str(t)}" if a2x_comms_button_visible("{key}", '
+                       f'COMMS_ORIGIN_ID):')
+        else:
+            out.append(f'    + "{_mast_str(t)}":')
         out += _button_body(em, button_events.get(t), handler_tag)
     return out
 
@@ -1523,6 +1562,34 @@ def build_notes(mission: Mission, em: Emitter) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _prescan_end_outcomes(mission: Mission, em: Emitter) -> None:
+    """Decide, per ``end_mission``, whether the mission was won or lost.
+
+    The terminal event rarely says: 2.8 missions usually end from a bare ``EndMission``
+    flag event, set by the event that actually decided things (the one carrying the
+    "MISSION FAILED" big_message). So an ending takes its own event's outcome if that
+    reads clearly, else the outcome ALL of its deciders agree on. Anything ambiguous --
+    a win and a loss that both set the same end flag -- gets no sting at all.
+    Same keyword classifier the AMD target uses for Win:/Lose:.
+    """
+    from .amd_emit import _classify_outcome, _is_decider, _satisfies
+    for ev in mission.events:
+        ends = [c for c in ev.commands if c.tag == "end_mission"]
+        if not ends:
+            continue
+        outcome = _classify_outcome(ev)
+        if outcome is None:
+            gates = [(c.get("name"), c.get("comparator", "EQUALS"), c.get("value"))
+                     for c in ev.conditions if c.tag == "if_variable" and c.get("name")]
+            found = {_classify_outcome(d) for d in mission.events
+                     if gates and _is_decider(d, gates)}
+            if len(found) == 1:
+                outcome = found.pop()
+        if outcome is not None:
+            for c in ends:
+                em.end_outcomes[id(c)] = outcome
+
+
 def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSION,
                  hullmap: dict | None = None, event_model: str = "hybrid",
                  target: str = "amd") -> str:
@@ -1535,6 +1602,7 @@ def convert_file(path: str, out_root: str, lib_version: str = DEFAULT_LIB_VERSIO
     mission = parse_file(path)
     em = Emitter(mission, hullmap=hullmap)
     _prescan_references(mission, em)  # names used later -> keep those monsters capturable
+    _prescan_end_outcomes(mission, em)  # end_mission -> victory / failure sting
 
     if target == "amd":
         from .amd_emit import build_amd_target

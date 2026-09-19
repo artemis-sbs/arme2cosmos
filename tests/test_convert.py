@@ -167,7 +167,7 @@ class ConvertTests(unittest.TestCase):
         # via spawn_players, which repositions ships near a friendly station and would
         # throw away the 2.8 spawn coordinates the mission actually specified.
         route = story[story.index("//shared/signal/game_started"):]
-        self.assertIn('delete_object(role("a2x_spare_player"))', route)
+        self.assertIn('a2x_park_spare_players("a2x_spare_player")', route)
         # no CALL to spawn_players (the name appears in a comment explaining why not)
         for call in ("task_schedule(spawn_players", "await spawn_players", "\n    spawn_players("):
             self.assertNotIn(call, story)
@@ -284,7 +284,7 @@ class ConvertTests(unittest.TestCase):
         self.assertEqual(story.count('side="friendly, a2x_spare_player"'), 7)
         artemis = [l for l in story.splitlines() if 'name="Artemis"' in l][0]
         self.assertNotIn("a2x_spare_player", artemis)
-        self.assertIn('delete_object(role("a2x_spare_player"))', story)
+        self.assertIn('a2x_park_spare_players("a2x_spare_player")', story)
 
     def test_baseline_addons_cover_what_2_8_gives_every_mission(self):
         # science_scans and basic_player_destroy are BASELINE, not feature-detected: 2.8
@@ -1005,6 +1005,69 @@ class ConvertTests(unittest.TestCase):
         _, story, _ = self._convert()
         self.assertIn('signal_emit("show_game_results")', story)
         self.assertIn('->END', story)
+        self.assertIn("shared GAME_ENDED = True", story)
+        # Neither "End" nor the "Attack" event that sets its flag says win or lose.
+        self.assertNotIn("music_play_sting", story)
+
+    def _convert_text(self, name, body):
+        xml = os.path.join(self.tmp.name, f"MISS_{name}.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write(f'<mission_data version="1.0"><start>'
+                    f'<create type="player" x="1" y="0" z="1" name="Artemis"/></start>'
+                    f'{body}</mission_data>')
+        d = convert_file(xml, self.out, target="mast")
+        with open(os.path.join(d, "story.mast"), encoding="utf-8") as f:
+            story = f.read()
+        settings = os.path.join(d, "settings.yaml")
+        yaml = open(settings, encoding="utf-8").read() if os.path.isfile(settings) else ""
+        return story, yaml
+
+    def test_end_mission_sting_follows_the_deciding_event(self):
+        # The terminal event is a bare flag test; the event that SET the flag is what
+        # says whether it was a loss.
+        story, _ = self._convert_text("Lost", """
+  <event name="BaseLost"><if_not_exists name="DS1"/>
+    <big_message title="MISSION FAILED"/><set_variable name="EndIt" value="1"/></event>
+  <event name="Finish"><if_variable name="EndIt" comparator="EQUALS" value="1"/>
+    <end_mission/></event>""")
+        self.assertIn('music_play_sting("failure")', story)
+
+    def test_end_mission_with_a_win_and_a_loss_on_one_flag_has_no_sting(self):
+        story, _ = self._convert_text("Either", """
+  <event name="Won"><if_variable name="k" comparator="EQUALS" value="1"/>
+    <big_message title="VICTORY"/><set_variable name="EndIt" value="1"/></event>
+  <event name="Lost"><if_variable name="k" comparator="EQUALS" value="2"/>
+    <big_message title="MISSION FAILED"/><set_variable name="EndIt" value="1"/></event>
+  <event name="Finish"><if_variable name="EndIt" comparator="EQUALS" value="1"/>
+    <end_mission/></event>""")
+        self.assertNotIn("music_play_sting", story)
+
+    def test_non_typhon_monster_turns_its_setting_on_and_keeps_its_name(self):
+        story, yaml = self._convert_text("Shark", """
+  <event name="Spawn"><if_variable name="k" comparator="EQUALS" value="1"/>
+    <create type="monster" monsterType="2" x="5" y="0" z="5" name="Jaws"/></event>""")
+        self.assertIn("prefab_shark", story)
+        self.assertIn('"name": "Jaws"', story)
+        self.assertIn("MONSTER_NON_TYPHON: true", yaml)
+
+    def test_grazer_needs_no_setting(self):
+        _, yaml = self._convert_text("Grazer", """
+  <event name="Spawn"><if_variable name="k" comparator="EQUALS" value="1"/>
+    <create type="monster" monsterType="1" x="5" y="0" z="5"/></event>""")
+        self.assertNotIn("MONSTER_NON_TYPHON", yaml)
+
+    def test_side_value_condition_is_read_live(self):
+        story, _ = self._convert_text("Capture", """
+  <event name="Captured"><if_object_property name="DS1" property="sideValue" comparator="EQUALS" value="2"/>
+    <set_variable name="held" value="1"/></event>""")
+        self.assertIn('a2x_object_property(', story)
+        self.assertIn('"sideValue") or 0) == 2', story)
+
+    def test_a_variable_named_like_a_mast_global_is_renamed(self):
+        from arme2cosmos.emit import _pyname
+        for bad in ("range", "END", "shared", "class", "log"):
+            self.assertEqual(bad + "_", _pyname(bad))
+        self.assertEqual("EndIt", _pyname("EndIt"))
 
     def test_comms_and_big_message_are_real_calls(self):
         # add a start with comms + big_message to the sample on the fly
@@ -1371,16 +1434,56 @@ class ConvertCommsButtonTests(unittest.TestCase):
     def test_comms_route_with_button(self):
         story = self._story()
         self.assertIn("//comms", story)
-        self.assertIn('+ "Request Bounty":', story)
-        # the handler event's command shows up inside the button body (indented 8)
-        self.assertIn("        a2x_big_message", story)
+        # shown only while set, for the pressing ship's side
+        self.assertIn('+ "Request Bounty" if a2x_comms_button_visible("Request Bounty", '
+                      'COMMS_ORIGIN_ID):', story)
+        self.assertIn('a2x_set_comms_button("Request Bounty", 2)', story)
+        # the handler's own flag is a live guard, not a comment; its body sits under it
+        self.assertNotIn("# guard: <if_variable", story)
+        self.assertIn("        if (paid != 1):", story)
+        self.assertIn("            a2x_big_message", story)
+
+    def test_a_colon_in_the_button_text_stays_out_of_the_condition(self):
+        xml = os.path.join(self.tmp.name, "MISS_Colon.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<mission_data version="2.8"><start>
+    <set_comms_button text="Dispatch Security to:"/></start>
+  <event name="Go"><if_comms_button text="Dispatch Security to:"/>
+    <set_variable name="sent" value="1"/></event>
+</mission_data>""")
+        d = convert_file(xml, self.out + "4", target="mast")
+        story = open(os.path.join(d, "story.mast"), encoding="utf-8").read()
+        line = next(ln for ln in story.splitlines() if "a2x_comms_button_visible" in ln)
+        cond = line.split(" if ", 1)[1]
+        self.assertNotIn(":", cond[:-1])      # only the block-start colon at the end
+        self.assertIn('"Dispatch Security to\\x3a"', cond)
+
+    def test_every_handler_for_a_button_is_emitted(self):
+        xml = os.path.join(self.tmp.name, "MISS_Two.xml")
+        with open(xml, "w", encoding="utf-8") as f:
+            f.write("""<mission_data version="2.8"><start>
+    <set_comms_button text="Hail"/></start>
+  <event name="First"><if_comms_button text="Hail"/>
+    <if_variable name="stage" comparator="EQUALS" value="1"/>
+    <set_variable name="said1" value="1"/><clear_comms_button text="Hail"/></event>
+  <event name="Second"><if_comms_button text="Hail"/>
+    <if_variable name="stage" comparator="EQUALS" value="2"/>
+    <set_variable name="said2" value="1"/></event>
+</mission_data>""")
+        d = convert_file(xml, self.out + "3", target="mast")
+        story = open(os.path.join(d, "story.mast"), encoding="utf-8").read()
+        self.assertIn("said1 = 1", story)
+        self.assertIn("said2 = 1", story)   # used to be dropped: only the first handler ran
+        self.assertIn("if (stage == 1):", story)
+        self.assertIn("if (stage == 2):", story)
+        self.assertIn('a2x_clear_comms_button("Hail")', story)
 
     def test_button_event_excluded_from_chain(self):
         story = self._story()
         # the comms-button event lives in the //comms route (its handler body indented 8),
         # not as a chain/task event; the non-button event is emitted once elsewhere.
-        self.assertIn('+ "Request Bounty":', story)
-        self.assertIn("        a2x_big_message", story)
+        self.assertIn('+ "Request Bounty" if a2x_comms_button_visible', story)
+        self.assertIn("            a2x_big_message", story)
         self.assertEqual(story.count("done = 1"), 1)
 
     def test_quick_wins_log_sound_griddamage(self):
@@ -1497,7 +1600,7 @@ class ConvertCommsButtonTests(unittest.TestCase):
 </mission_data>""")
         d = convert_file(xml, self.out + "2")
         story = open(os.path.join(d, "story.mast"), encoding="utf-8").read()
-        self.assertIn('+ "Noop":', story)
+        self.assertIn('+ "Noop" if a2x_comms_button_visible("Noop", COMMS_ORIGIN_ID):', story)
         self.assertIn("~~ pass ~~", story)
 
 
